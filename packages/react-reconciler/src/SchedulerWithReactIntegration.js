@@ -11,10 +11,7 @@
 // CommonJS interop named imports.
 import * as Scheduler from 'scheduler';
 import {__interactionsRef} from 'scheduler/tracing';
-import {
-  disableYielding,
-  enableSchedulerTracing,
-} from 'shared/ReactFeatureFlags';
+import {enableSchedulerTracing} from 'shared/ReactFeatureFlags';
 import invariant from 'shared/invariant';
 
 const {
@@ -22,6 +19,7 @@ const {
   unstable_scheduleCallback: Scheduler_scheduleCallback,
   unstable_cancelCallback: Scheduler_cancelCallback,
   unstable_shouldYield: Scheduler_shouldYield,
+  unstable_requestPaint: Scheduler_requestPaint,
   unstable_now: Scheduler_now,
   unstable_getCurrentPriorityLevel: Scheduler_getCurrentPriorityLevel,
   unstable_ImmediatePriority: Scheduler_ImmediatePriority,
@@ -45,7 +43,7 @@ if (enableSchedulerTracing) {
   );
 }
 
-export opaque type ReactPriorityLevel = 99 | 98 | 97 | 96 | 95 | 90;
+export type ReactPriorityLevel = 99 | 98 | 97 | 96 | 95 | 90;
 export type SchedulerCallback = (isSync: boolean) => SchedulerCallback | null;
 
 type SchedulerCallbackOptions = {
@@ -65,14 +63,25 @@ export const IdlePriority: ReactPriorityLevel = 95;
 // NoPriority is the absence of priority. Also React-only.
 export const NoPriority: ReactPriorityLevel = 90;
 
-export const now = Scheduler_now;
-export const shouldYield = disableYielding
-  ? () => false // Never yield when `disableYielding` is on
-  : Scheduler_shouldYield;
+export const shouldYield = Scheduler_shouldYield;
+export const requestPaint =
+  // Fall back gracefully if we're running an older version of Scheduler.
+  Scheduler_requestPaint !== undefined ? Scheduler_requestPaint : () => {};
 
-let immediateQueue: Array<SchedulerCallback> | null = null;
+let syncQueue: Array<SchedulerCallback> | null = null;
 let immediateQueueCallbackNode: mixed | null = null;
-let isFlushingImmediate: boolean = false;
+let isFlushingSyncQueue: boolean = false;
+let initialTimeMs: number = Scheduler_now();
+
+// If the initial timestamp is reasonably small, use Scheduler's `now` directly.
+// This will be the case for modern browsers that support `performance.now`. In
+// older browsers, Scheduler falls back to `Date.now`, which returns a Unix
+// timestamp. In that case, subtract the module initialization time to simulate
+// the behavior of performance.now and keep our times small enough to fit
+// within 32 bits.
+// TODO: Consider lifting this into Scheduler.
+export const now =
+  initialTimeMs < 10000 ? Scheduler_now : () => Scheduler_now() - initialTimeMs;
 
 export function getCurrentPriorityLevel(): ReactPriorityLevel {
   switch (Scheduler_getCurrentPriorityLevel()) {
@@ -121,26 +130,26 @@ export function scheduleCallback(
   callback: SchedulerCallback,
   options: SchedulerCallbackOptions | void | null,
 ) {
-  if (reactPriorityLevel === ImmediatePriority) {
-    // Push this callback into an internal queue. We'll flush these either in
-    // the next tick, or earlier if something calls `flushImmediateQueue`.
-    if (immediateQueue === null) {
-      immediateQueue = [callback];
-      // Flush the queue in the next tick, at the earliest.
-      immediateQueueCallbackNode = Scheduler_scheduleCallback(
-        Scheduler_ImmediatePriority,
-        flushImmediateQueueImpl,
-      );
-    } else {
-      // Push onto existing queue. Don't need to schedule a callback because
-      // we already scheduled one when we created the queue.
-      immediateQueue.push(callback);
-    }
-    return fakeCallbackNode;
-  }
-  // Otherwise pass through to Scheduler.
   const priorityLevel = reactPriorityToSchedulerPriority(reactPriorityLevel);
   return Scheduler_scheduleCallback(priorityLevel, callback, options);
+}
+
+export function scheduleSyncCallback(callback: SchedulerCallback) {
+  // Push this callback into an internal queue. We'll flush these either in
+  // the next tick, or earlier if something calls `flushSyncCallbackQueue`.
+  if (syncQueue === null) {
+    syncQueue = [callback];
+    // Flush the queue in the next tick, at the earliest.
+    immediateQueueCallbackNode = Scheduler_scheduleCallback(
+      Scheduler_ImmediatePriority,
+      flushSyncCallbackQueueImpl,
+    );
+  } else {
+    // Push onto existing queue. Don't need to schedule a callback because
+    // we already scheduled one when we created the queue.
+    syncQueue.push(callback);
+  }
+  return fakeCallbackNode;
 }
 
 export function cancelCallback(callbackNode: mixed) {
@@ -149,40 +158,45 @@ export function cancelCallback(callbackNode: mixed) {
   }
 }
 
-export function flushImmediateQueue() {
+export function flushSyncCallbackQueue() {
   if (immediateQueueCallbackNode !== null) {
-    Scheduler_cancelCallback(immediateQueueCallbackNode);
+    const node = immediateQueueCallbackNode;
+    immediateQueueCallbackNode = null;
+    Scheduler_cancelCallback(node);
   }
-  flushImmediateQueueImpl();
+  flushSyncCallbackQueueImpl();
 }
 
-function flushImmediateQueueImpl() {
-  if (!isFlushingImmediate && immediateQueue !== null) {
+function flushSyncCallbackQueueImpl() {
+  if (!isFlushingSyncQueue && syncQueue !== null) {
     // Prevent re-entrancy.
-    isFlushingImmediate = true;
+    isFlushingSyncQueue = true;
     let i = 0;
     try {
       const isSync = true;
-      for (; i < immediateQueue.length; i++) {
-        let callback = immediateQueue[i];
-        do {
-          callback = callback(isSync);
-        } while (callback !== null);
-      }
-      immediateQueue = null;
+      const queue = syncQueue;
+      runWithPriority(ImmediatePriority, () => {
+        for (; i < queue.length; i++) {
+          let callback = queue[i];
+          do {
+            callback = callback(isSync);
+          } while (callback !== null);
+        }
+      });
+      syncQueue = null;
     } catch (error) {
       // If something throws, leave the remaining callbacks on the queue.
-      if (immediateQueue !== null) {
-        immediateQueue = immediateQueue.slice(i + 1);
+      if (syncQueue !== null) {
+        syncQueue = syncQueue.slice(i + 1);
       }
       // Resume flushing in the next tick
       Scheduler_scheduleCallback(
         Scheduler_ImmediatePriority,
-        flushImmediateQueue,
+        flushSyncCallbackQueue,
       );
       throw error;
     } finally {
-      isFlushingImmediate = false;
+      isFlushingSyncQueue = false;
     }
   }
 }

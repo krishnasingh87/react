@@ -9,9 +9,7 @@
 
 import type {LazyComponent} from 'shared/ReactLazyComponent';
 
-import warningWithoutStack from 'shared/warningWithoutStack';
 import {
-  REACT_CONCURRENT_MODE_TYPE,
   REACT_CONTEXT_TYPE,
   REACT_FORWARD_REF_TYPE,
   REACT_FRAGMENT_TYPE,
@@ -21,17 +19,11 @@ import {
   REACT_PROVIDER_TYPE,
   REACT_STRICT_MODE_TYPE,
   REACT_SUSPENSE_TYPE,
+  REACT_SUSPENSE_LIST_TYPE,
   REACT_LAZY_TYPE,
-  REACT_EVENT_COMPONENT_TYPE,
-  REACT_EVENT_TARGET_TYPE,
-  REACT_EVENT_TARGET_TOUCH_HIT,
-  REACT_EVENT_FOCUS_TARGET,
-  REACT_EVENT_PRESS_TARGET,
+  REACT_CHUNK_TYPE,
 } from 'shared/ReactSymbols';
 import {refineResolvedLazyComponent} from 'shared/ReactLazyComponent';
-import type {ReactEventComponent, ReactEventTarget} from 'shared/ReactTypes';
-
-import {enableEventAPI} from './ReactFeatureFlags';
 
 function getWrappedName(
   outerType: mixed,
@@ -52,8 +44,7 @@ function getComponentName(type: mixed): string | null {
   }
   if (__DEV__) {
     if (typeof (type: any).tag === 'number') {
-      warningWithoutStack(
-        false,
+      console.error(
         'Received an unexpected object in getComponentName(). ' +
           'This is likely a bug in React. Please file an issue.',
       );
@@ -66,8 +57,6 @@ function getComponentName(type: mixed): string | null {
     return type;
   }
   switch (type) {
-    case REACT_CONCURRENT_MODE_TYPE:
-      return 'ConcurrentMode';
     case REACT_FRAGMENT_TYPE:
       return 'Fragment';
     case REACT_PORTAL_TYPE:
@@ -78,6 +67,8 @@ function getComponentName(type: mixed): string | null {
       return 'StrictMode';
     case REACT_SUSPENSE_TYPE:
       return 'Suspense';
+    case REACT_SUSPENSE_LIST_TYPE:
+      return 'SuspenseList';
   }
   if (typeof type === 'object') {
     switch (type.$$typeof) {
@@ -89,6 +80,8 @@ function getComponentName(type: mixed): string | null {
         return getWrappedName(type, type.render, 'ForwardRef');
       case REACT_MEMO_TYPE:
         return getComponentName(type.type);
+      case REACT_CHUNK_TYPE:
+        return getComponentName(type.render);
       case REACT_LAZY_TYPE: {
         const thenable: LazyComponent<mixed> = (type: any);
         const resolvedThenable = refineResolvedLazyComponent(thenable);
@@ -96,32 +89,6 @@ function getComponentName(type: mixed): string | null {
           return getComponentName(resolvedThenable);
         }
         break;
-      }
-      case REACT_EVENT_COMPONENT_TYPE: {
-        if (enableEventAPI) {
-          const eventComponent = ((type: any): ReactEventComponent);
-          const displayName = eventComponent.displayName;
-          if (displayName !== undefined) {
-            return displayName;
-          }
-        }
-        break;
-      }
-      case REACT_EVENT_TARGET_TYPE: {
-        if (enableEventAPI) {
-          const eventTarget = ((type: any): ReactEventTarget);
-          if (eventTarget.type === REACT_EVENT_TARGET_TOUCH_HIT) {
-            return 'TouchHitTarget';
-          } else if (eventTarget.type === REACT_EVENT_FOCUS_TARGET) {
-            return 'FocusTarget';
-          } else if (eventTarget.type === REACT_EVENT_PRESS_TARGET) {
-            return 'PressTarget';
-          }
-          const displayName = eventTarget.displayName;
-          if (displayName !== undefined) {
-            return displayName;
-          }
-        }
       }
     }
   }

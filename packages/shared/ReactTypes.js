@@ -13,9 +13,7 @@ export type ReactNode =
   | ReactText
   | ReactFragment
   | ReactProvider<any>
-  | ReactConsumer<any>
-  | ReactEventComponent
-  | ReactEventTarget;
+  | ReactConsumer<any>;
 
 export type ReactEmpty = null | void | boolean;
 
@@ -81,102 +79,105 @@ export type RefObject = {|
   current: any,
 |};
 
-export type ReactEventResponderEventType =
-  | string
-  | {name: string, passive?: boolean, capture?: boolean};
-
-export type ReactEventResponder = {
-  targetEventTypes: Array<ReactEventResponderEventType>,
-  createInitialState?: (props: null | Object) => Object,
-  onEvent: (
-    event: ReactResponderEvent,
-    context: ReactResponderContext,
-    props: null | Object,
-    state: null | Object,
-  ) => void,
-  onUnmount: (
-    context: ReactResponderContext,
-    props: null | Object,
-    state: null | Object,
-  ) => void,
-  onOwnershipChange: (
-    context: ReactResponderContext,
-    props: null | Object,
-    state: null | Object,
-  ) => void,
-};
-
-export type ReactEventComponentInstance = {|
-  context: null | Object,
-  props: null | Object,
-  responder: ReactEventResponder,
-  rootInstance: mixed,
-  state: null | Object,
+export type ReactEventResponderInstance<E, C> = {|
+  fiber: Object,
+  props: Object,
+  responder: ReactEventResponder<E, C>,
+  rootEventTypes: null | Set<string>,
+  state: Object,
 |};
 
-export type ReactEventComponent = {|
+export type ReactEventResponderListener<E, C> = {|
+  props: Object,
+  responder: ReactEventResponder<E, C>,
+|};
+
+export type ReactEventResponder<E, C> = {
   $$typeof: Symbol | number,
-  displayName?: string,
-  props: null | Object,
-  responder: ReactEventResponder,
+  displayName: string,
+  targetEventTypes: null | Array<string>,
+  targetPortalPropagation: boolean,
+  getInitialState: null | ((props: Object) => Object),
+  onEvent:
+    | null
+    | ((event: E, context: C, props: Object, state: Object) => void),
+  onRootEvent:
+    | null
+    | ((event: E, context: C, props: Object, state: Object) => void),
+  onMount: null | ((context: C, props: Object, state: Object) => void),
+  onUnmount: null | ((context: C, props: Object, state: Object) => void),
+};
+
+export type EventPriority = 0 | 1 | 2;
+
+export const DiscreteEvent: EventPriority = 0;
+export const UserBlockingEvent: EventPriority = 1;
+export const ContinuousEvent: EventPriority = 2;
+
+export type ReactFundamentalComponentInstance<C, H> = {|
+  currentFiber: mixed,
+  instance: mixed,
+  prevProps: null | Object,
+  props: Object,
+  impl: ReactFundamentalImpl<C, H>,
+  state: Object,
 |};
 
-export type ReactEventTarget = {|
+export type ReactFundamentalImpl<C, H> = {
+  displayName: string,
+  reconcileChildren: boolean,
+  getInitialState?: (props: Object) => Object,
+  getInstance: (context: C, props: Object, state: Object) => H,
+  getServerSideString?: (context: C, props: Object) => string,
+  getServerSideStringClose?: (context: C, props: Object) => string,
+  onMount: (context: C, instance: mixed, props: Object, state: Object) => void,
+  shouldUpdate?: (
+    context: C,
+    prevProps: null | Object,
+    nextProps: Object,
+    state: Object,
+  ) => boolean,
+  onUpdate?: (
+    context: C,
+    instance: mixed,
+    prevProps: null | Object,
+    nextProps: Object,
+    state: Object,
+  ) => void,
+  onUnmount?: (
+    context: C,
+    instance: mixed,
+    props: Object,
+    state: Object,
+  ) => void,
+  onHydrate?: (context: C, props: Object, state: Object) => boolean,
+  onFocus?: (context: C, props: Object, state: Object) => boolean,
+};
+
+export type ReactFundamentalComponent<C, H> = {|
   $$typeof: Symbol | number,
-  displayName?: string,
-  type: Symbol | number,
+  impl: ReactFundamentalImpl<C, H>,
 |};
 
-type AnyNativeEvent = Event | KeyboardEvent | MouseEvent | Touch;
+export type ReactScope = {|
+  $$typeof: Symbol | number,
+|};
 
-export type ReactResponderEvent = {
-  nativeEvent: AnyNativeEvent,
-  target: Element | Document,
-  type: string,
-  passive: boolean,
-  passiveSupported: boolean,
-};
+export type ReactScopeMethods = {|
+  getChildren(): null | Array<ReactScopeMethods>,
+  getChildrenFromRoot(): null | Array<ReactScopeMethods>,
+  getParent(): null | ReactScopeMethods,
+  getProps(): Object,
+  queryAllNodes(
+    (type: string | Object, props: Object, instance: Object) => boolean,
+  ): null | Array<Object>,
+  queryFirstNode(
+    (type: string | Object, props: Object, instance: Object) => boolean,
+  ): null | Object,
+  containsNode(Object): boolean,
+|};
 
-export type ReactResponderDispatchEventOptions = {
-  capture?: boolean,
-  discrete?: boolean,
-};
-
-export type ReactResponderContext = {
-  dispatchEvent: (
-    eventObject: Object,
-    listener: (Object) => void,
-    otpions: ReactResponderDispatchEventOptions,
-  ) => void,
-  dispatchStopPropagation: (passive?: boolean) => void,
-  isTargetWithinElement: (
-    childTarget: Element | Document,
-    parentTarget: Element | Document,
-  ) => boolean,
-  isTargetWithinEventComponent: (Element | Document) => boolean,
-  isPositionWithinTouchHitTarget: (
-    doc: Document,
-    x: number,
-    y: number,
-  ) => boolean,
-  addRootEventTypes: (
-    document: Document,
-    rootEventTypes: Array<ReactEventResponderEventType>,
-  ) => void,
-  removeRootEventTypes: (
-    rootEventTypes: Array<ReactEventResponderEventType>,
-  ) => void,
-  hasOwnership: () => boolean,
-  requestOwnership: () => boolean,
-  releaseOwnership: () => boolean,
-  setTimeout: (func: () => void, timeout: number) => Symbol,
-  clearTimeout: (timerId: Symbol) => void,
-  getEventTargetsFromTarget: (
-    target: Element | Document,
-    queryType?: Symbol | number,
-    queryKey?: string,
-  ) => Array<{
-    node: Element,
-    props: null | Object,
-  }>,
-};
+export type ReactScopeInstance = {|
+  fiber: Object,
+  methods: null | ReactScopeMethods,
+|};

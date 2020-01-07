@@ -36,13 +36,16 @@ import {
   Profiler,
   MemoComponent,
   SimpleMemoComponent,
+  Chunk,
   IncompleteClassComponent,
+  ScopeComponent,
 } from 'shared/ReactWorkTags';
 import invariant from 'shared/invariant';
 import ReactVersion from 'shared/ReactVersion';
 import act from './ReactTestRendererAct';
 
 import {getPublicInstance} from './ReactTestHostConfig';
+import {ConcurrentRoot, LegacyRoot} from 'shared/ReactRootTags';
 
 type TestRendererOptions = {
   createNodeMock: (element: React$Element<any>) => any,
@@ -183,6 +186,14 @@ function toTree(node: ?Fiber) {
         instance: null,
         rendered: childrenToTree(node.child),
       };
+    case Chunk:
+      return {
+        nodeType: 'chunk',
+        type: node.type,
+        props: {...node.memoizedProps},
+        instance: null,
+        rendered: childrenToTree(node.child),
+      };
     case HostComponent: {
       return {
         nodeType: 'host',
@@ -202,6 +213,7 @@ function toTree(node: ?Fiber) {
     case ForwardRef:
     case MemoComponent:
     case IncompleteClassComponent:
+    case ScopeComponent:
       return childrenToTree(node.child);
     default:
       invariant(
@@ -219,6 +231,7 @@ const validWrapperTypes = new Set([
   ForwardRef,
   MemoComponent,
   SimpleMemoComponent,
+  Chunk,
   // Normally skipped, but used when there's more than one root child.
   HostRoot,
 ]);
@@ -439,8 +452,9 @@ const ReactTestRendererFiber = {
     };
     let root: FiberRoot | null = createContainer(
       container,
-      isConcurrent,
+      isConcurrent ? ConcurrentRoot : LegacyRoot,
       false,
+      null,
     );
     invariant(root != null, 'something went wrong');
     updateContainer(element, root, null, null);

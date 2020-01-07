@@ -45,12 +45,12 @@ describe('ReactCache', () => {
                 listeners = [{resolve, reject}];
                 setTimeout(() => {
                   if (textResourceShouldFail) {
-                    Scheduler.yieldValue(`Promise rejected [${text}]`);
+                    Scheduler.unstable_yieldValue(`Promise rejected [${text}]`);
                     status = 'rejected';
                     value = new Error('Failed to load: ' + text);
                     listeners.forEach(listener => listener.reject(value));
                   } else {
-                    Scheduler.yieldValue(`Promise resolved [${text}]`);
+                    Scheduler.unstable_yieldValue(`Promise resolved [${text}]`);
                     status = 'resolved';
                     value = text;
                     listeners.forEach(listener => listener.resolve(value));
@@ -78,7 +78,7 @@ describe('ReactCache', () => {
   });
 
   function Text(props) {
-    Scheduler.yieldValue(props.text);
+    Scheduler.unstable_yieldValue(props.text);
     return props.text;
   }
 
@@ -86,13 +86,13 @@ describe('ReactCache', () => {
     const text = props.text;
     try {
       TextResource.read([props.text, props.ms]);
-      Scheduler.yieldValue(text);
+      Scheduler.unstable_yieldValue(text);
       return text;
     } catch (promise) {
       if (typeof promise.then === 'function') {
-        Scheduler.yieldValue(`Suspend! [${text}]`);
+        Scheduler.unstable_yieldValue(`Suspend! [${text}]`);
       } else {
-        Scheduler.yieldValue(`Error! [${text}]`);
+        Scheduler.unstable_yieldValue(`Error! [${text}]`);
       }
       throw promise;
     }
@@ -156,7 +156,7 @@ describe('ReactCache', () => {
     });
 
     function App() {
-      Scheduler.yieldValue('App');
+      Scheduler.unstable_yieldValue('App');
       return BadTextResource.read(['Hi', 100]);
     }
 
@@ -172,15 +172,12 @@ describe('ReactCache', () => {
     if (__DEV__) {
       expect(() => {
         expect(Scheduler).toFlushAndYield(['App', 'Loading...']);
-      }).toWarnDev(
-        [
-          'Invalid key type. Expected a string, number, symbol, or ' +
-            'boolean, but instead received: Hi,100\n\n' +
-            'To use non-primitive values as keys, you must pass a hash ' +
-            'function as the second argument to createResource().',
-        ],
-        {withoutStack: true},
-      );
+      }).toErrorDev([
+        'Invalid key type. Expected a string, number, symbol, or ' +
+          'boolean, but instead received: Hi,100\n\n' +
+          'To use non-primitive values as keys, you must pass a hash ' +
+          'function as the second argument to createResource().',
+      ]);
     } else {
       expect(Scheduler).toFlushAndYield(['App', 'Loading...']);
     }
@@ -321,13 +318,13 @@ describe('ReactCache', () => {
       const text = props.text;
       try {
         const actualText = BadTextResource.read([props.text, props.ms]);
-        Scheduler.yieldValue(actualText);
+        Scheduler.unstable_yieldValue(actualText);
         return actualText;
       } catch (promise) {
         if (typeof promise.then === 'function') {
-          Scheduler.yieldValue(`Suspend! [${text}]`);
+          Scheduler.unstable_yieldValue(`Suspend! [${text}]`);
         } else {
-          Scheduler.yieldValue(`Error! [${text}]`);
+          Scheduler.unstable_yieldValue(`Error! [${text}]`);
         }
         throw promise;
       }

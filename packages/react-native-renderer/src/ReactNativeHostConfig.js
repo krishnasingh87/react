@@ -8,15 +8,16 @@
  */
 
 import type {ReactNativeBaseComponentViewConfig} from './ReactNativeTypes';
-import type {ReactEventComponentInstance} from 'shared/ReactTypes';
 
 import invariant from 'shared/invariant';
 
 // Modules provided by RN:
-import UIManager from 'UIManager';
-import deepFreezeAndThrowOnMutationInDev from 'deepFreezeAndThrowOnMutationInDev';
+import {
+  ReactNativeViewConfigRegistry,
+  UIManager,
+  deepFreezeAndThrowOnMutationInDev,
+} from 'react-native/Libraries/ReactPrivate/ReactNativePrivateInterface';
 
-import {get as getViewConfigForType} from 'ReactNativeViewConfigRegistry';
 import {create, diff} from './ReactNativeAttributePayload';
 import {
   precacheFiberNode,
@@ -24,6 +25,8 @@ import {
   updateFiberProps,
 } from './ReactNativeComponentTree';
 import ReactNativeFiberHostComponent from './ReactNativeFiberHostComponent';
+
+const {get: getViewConfigForType} = ReactNativeViewConfigRegistry;
 
 export type Type = string;
 export type Props = Object;
@@ -101,11 +104,6 @@ export function createInstance(
       }
     }
   }
-
-  invariant(
-    type !== 'RCTView' || !hostContext.isInAParentText,
-    'Nesting of <View> within <Text> is not currently supported.',
-  );
 
   const updatePayload = create(props, viewConfig.validAttributes);
 
@@ -206,21 +204,6 @@ export function getChildHostContext(
   }
 }
 
-export function getChildHostContextForEventComponent(
-  parentHostContext: HostContext,
-) {
-  // TODO: add getChildHostContextForEventComponent implementation
-  return parentHostContext;
-}
-
-export function getChildHostContextForEventTarget(
-  parentHostContext: HostContext,
-  type: Symbol | number,
-) {
-  // TODO: add getChildHostContextForEventTarget implementation
-  return parentHostContext;
-}
-
 export function getPublicInstance(instance: Instance): * {
   return instance;
 }
@@ -245,6 +228,7 @@ export function resetAfterCommit(containerInfo: Container): void {
 }
 
 export const isPrimaryRenderer = true;
+export const warnsIfNotActing = true;
 
 export const scheduleTimeout = setTimeout;
 export const cancelTimeout = clearTimeout;
@@ -493,45 +477,46 @@ export function unhideTextInstance(
   throw new Error('Not yet implemented.');
 }
 
-export function mountEventComponent(
-  eventComponentInstance: ReactEventComponentInstance,
-) {
-  throw new Error('Not yet implemented.');
-}
-
-export function updateEventComponent(
-  eventComponentInstance: ReactEventComponentInstance,
-) {
-  throw new Error('Not yet implemented.');
-}
-
-export function unmountEventComponent(
-  eventComponentInstance: ReactEventComponentInstance,
-): void {
-  throw new Error('Not yet implemented.');
-}
-
-export function getEventTargetChildElement(
-  type: Symbol | number,
-  props: Props,
-): null {
-  throw new Error('Not yet implemented.');
-}
-
-export function handleEventTarget(
-  type: Symbol | number,
-  props: Props,
-  rootContainerInstance: Container,
-  internalInstanceHandle: Object,
-): boolean {
-  throw new Error('Not yet implemented.');
-}
-
-export function commitEventTarget(
-  type: Symbol | number,
-  props: Props,
+export function DEPRECATED_mountResponderInstance(
+  responder: any,
+  responderInstance: any,
+  props: Object,
+  state: Object,
   instance: Instance,
-  parentInstance: Instance,
+) {
+  throw new Error('Not yet implemented.');
+}
+
+export function DEPRECATED_unmountResponderInstance(
+  responderInstance: any,
 ): void {
   throw new Error('Not yet implemented.');
+}
+
+export function getFundamentalComponentInstance(fundamentalInstance) {
+  throw new Error('Not yet implemented.');
+}
+
+export function mountFundamentalComponent(fundamentalInstance) {
+  throw new Error('Not yet implemented.');
+}
+
+export function shouldUpdateFundamentalComponent(fundamentalInstance) {
+  throw new Error('Not yet implemented.');
+}
+
+export function updateFundamentalComponent(fundamentalInstance) {
+  throw new Error('Not yet implemented.');
+}
+
+export function unmountFundamentalComponent(fundamentalInstance) {
+  throw new Error('Not yet implemented.');
+}
+
+export function getInstanceFromNode(node) {
+  throw new Error('Not yet implemented.');
+}
+
+export function beforeRemoveInstance(instance) {
+  // noop
 }

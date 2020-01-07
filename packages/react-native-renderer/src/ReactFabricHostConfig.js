@@ -11,38 +11,41 @@ import type {
   MeasureInWindowOnSuccessCallback,
   MeasureLayoutOnSuccessCallback,
   MeasureOnSuccessCallback,
-  NativeMethodsMixinType,
+  NativeMethods,
   ReactNativeBaseComponentViewConfig,
 } from './ReactNativeTypes';
-import type {ReactEventComponentInstance} from 'shared/ReactTypes';
 
 import {mountSafeCallback_NOT_REALLY_SAFE} from './NativeMethodsMixinUtils';
 import {create, diff} from './ReactNativeAttributePayload';
-import {get as getViewConfigForType} from 'ReactNativeViewConfigRegistry';
 
-import deepFreezeAndThrowOnMutationInDev from 'deepFreezeAndThrowOnMutationInDev';
 import invariant from 'shared/invariant';
-import warningWithoutStack from 'shared/warningWithoutStack';
 
 import {dispatchEvent} from './ReactFabricEventEmitter';
 
 // Modules provided by RN:
-import TextInputState from 'TextInputState';
 import {
+  ReactNativeViewConfigRegistry,
+  TextInputState,
+  deepFreezeAndThrowOnMutationInDev,
+} from 'react-native/Libraries/ReactPrivate/ReactNativePrivateInterface';
+
+const {
   createNode,
   cloneNode,
   cloneNodeWithNewChildren,
   cloneNodeWithNewChildrenAndProps,
   cloneNodeWithNewProps,
-  createChildSet as createChildNodeSet,
-  appendChild as appendChildNode,
-  appendChildToSet as appendChildNodeToSet,
+  createChildSet: createChildNodeSet,
+  appendChild: appendChildNode,
+  appendChildToSet: appendChildNodeToSet,
   completeRoot,
   registerEventHandler,
-  measure as fabricMeasure,
-  measureInWindow as fabricMeasureInWindow,
-  measureLayout as fabricMeasureLayout,
-} from 'FabricUIManager';
+  measure: fabricMeasure,
+  measureInWindow: fabricMeasureInWindow,
+  measureLayout: fabricMeasureLayout,
+} = nativeFabricUIManager;
+
+const {get: getViewConfigForType} = ReactNativeViewConfigRegistry;
 
 // Counter for uniquely identifying views.
 // % 10 === 1 means it is a rootTag.
@@ -124,18 +127,19 @@ class ReactFabricHostComponent {
   }
 
   measureLayout(
-    relativeToNativeNode: number | Object,
+    relativeToNativeNode: number | ReactFabricHostComponent,
     onSuccess: MeasureLayoutOnSuccessCallback,
-    onFail: () => void /* currently unused */,
+    onFail?: () => void /* currently unused */,
   ) {
     if (
       typeof relativeToNativeNode === 'number' ||
       !(relativeToNativeNode instanceof ReactFabricHostComponent)
     ) {
-      warningWithoutStack(
-        false,
-        'Warning: ref.measureLayout must be called with a ref to a native component.',
-      );
+      if (__DEV__) {
+        console.error(
+          'Warning: ref.measureLayout must be called with a ref to a native component.',
+        );
+      }
 
       return;
     }
@@ -149,17 +153,18 @@ class ReactFabricHostComponent {
   }
 
   setNativeProps(nativeProps: Object) {
-    warningWithoutStack(
-      false,
-      'Warning: setNativeProps is not currently supported in Fabric',
-    );
+    if (__DEV__) {
+      console.error(
+        'Warning: setNativeProps is not currently supported in Fabric',
+      );
+    }
 
     return;
   }
 }
 
 // eslint-disable-next-line no-unused-expressions
-(ReactFabricHostComponent.prototype: NativeMethodsMixinType);
+(ReactFabricHostComponent.prototype: NativeMethods);
 
 export * from 'shared/HostConfigWithNoMutation';
 export * from 'shared/HostConfigWithNoHydration';
@@ -190,11 +195,6 @@ export function createInstance(
       }
     }
   }
-
-  invariant(
-    type !== 'RCTView' || !hostContext.isInAParentText,
-    'Nesting of <View> within <Text> is not currently supported.',
-  );
 
   const updatePayload = create(props, viewConfig.validAttributes);
 
@@ -282,21 +282,6 @@ export function getChildHostContext(
   }
 }
 
-export function getChildHostContextForEventComponent(
-  parentHostContext: HostContext,
-) {
-  // TODO: add getChildHostContextForEventComponent implementation
-  return parentHostContext;
-}
-
-export function getChildHostContextForEventTarget(
-  parentHostContext: HostContext,
-  type: Symbol | number,
-) {
-  // TODO: add getChildHostContextForEventTarget implementation
-  return parentHostContext;
-}
-
 export function getPublicInstance(instance: Instance): * {
   return instance.canonical;
 }
@@ -342,6 +327,9 @@ export function shouldSetTextContent(type: string, props: Props): boolean {
 
 // The Fabric renderer is secondary to the existing React Native renderer.
 export const isPrimaryRenderer = false;
+
+// The Fabric renderer shouldn't trigger missing act() warnings
+export const warnsIfNotActing = false;
 
 export const scheduleTimeout = setTimeout;
 export const cancelTimeout = clearTimeout;
@@ -433,45 +421,50 @@ export function replaceContainerChildren(
   newChildren: ChildSet,
 ): void {}
 
-export function mountEventComponent(
-  eventComponentInstance: ReactEventComponentInstance,
-) {
-  throw new Error('Not yet implemented.');
-}
-
-export function updateEventComponent(
-  eventComponentInstance: ReactEventComponentInstance,
-) {
-  throw new Error('Not yet implemented.');
-}
-
-export function unmountEventComponent(
-  eventComponentInstance: ReactEventComponentInstance,
-): void {
-  throw new Error('Not yet implemented.');
-}
-
-export function getEventTargetChildElement(
-  type: Symbol | number,
-  props: Props,
-): null {
-  throw new Error('Not yet implemented.');
-}
-
-export function handleEventTarget(
-  type: Symbol | number,
-  props: Props,
-  rootContainerInstance: Container,
-  internalInstanceHandle: Object,
-): boolean {
-  throw new Error('Not yet implemented.');
-}
-
-export function commitEventTarget(
-  type: Symbol | number,
-  props: Props,
+export function DEPRECATED_mountResponderInstance(
+  responder: any,
+  responderInstance: any,
+  props: Object,
+  state: Object,
   instance: Instance,
-  parentInstance: Instance,
+) {
+  throw new Error('Not yet implemented.');
+}
+
+export function DEPRECATED_unmountResponderInstance(
+  responderInstance: any,
 ): void {
   throw new Error('Not yet implemented.');
+}
+
+export function getFundamentalComponentInstance(fundamentalInstance) {
+  throw new Error('Not yet implemented.');
+}
+
+export function mountFundamentalComponent(fundamentalInstance) {
+  throw new Error('Not yet implemented.');
+}
+
+export function shouldUpdateFundamentalComponent(fundamentalInstance) {
+  throw new Error('Not yet implemented.');
+}
+
+export function updateFundamentalComponent(fundamentalInstance) {
+  throw new Error('Not yet implemented.');
+}
+
+export function unmountFundamentalComponent(fundamentalInstance) {
+  throw new Error('Not yet implemented.');
+}
+
+export function cloneFundamentalInstance(fundamentalInstance) {
+  throw new Error('Not yet implemented.');
+}
+
+export function getInstanceFromNode(node) {
+  throw new Error('Not yet implemented.');
+}
+
+export function beforeRemoveInstance(instance) {
+  // noop
 }

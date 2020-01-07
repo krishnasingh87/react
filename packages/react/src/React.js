@@ -7,11 +7,11 @@
 
 import ReactVersion from 'shared/ReactVersion';
 import {
-  REACT_CONCURRENT_MODE_TYPE,
   REACT_FRAGMENT_TYPE,
   REACT_PROFILER_TYPE,
   REACT_STRICT_MODE_TYPE,
   REACT_SUSPENSE_TYPE,
+  REACT_SUSPENSE_LIST_TYPE,
 } from 'shared/ReactSymbols';
 
 import {Component, PureComponent} from './ReactBaseClasses';
@@ -28,6 +28,7 @@ import {createContext} from './ReactContext';
 import {lazy} from './ReactLazy';
 import forwardRef from './forwardRef';
 import memo from './memo';
+import chunk from './chunk';
 import {
   useCallback,
   useContext,
@@ -39,7 +40,11 @@ import {
   useReducer,
   useRef,
   useState,
+  useResponder,
+  useTransition,
+  useDeferredValue,
 } from './ReactHooks';
+import {withSuspenseConfig} from './ReactBatchConfig';
 import {
   createElementWithValidation,
   createFactoryWithValidation,
@@ -49,12 +54,17 @@ import {
   jsxWithValidationDynamic,
 } from './ReactElementValidator';
 import ReactSharedInternals from './ReactSharedInternals';
-import {error, warn} from './withComponentStack';
+import createFundamental from 'shared/createFundamentalComponent';
+import createResponder from 'shared/createEventResponder';
+import createScope from 'shared/createScope';
 import {
-  enableStableConcurrentModeAPIs,
   enableJSXTransformAPI,
+  enableDeprecatedFlareAPI,
+  enableFundamentalAPI,
+  enableScopeAPI,
+  exposeConcurrentModeAPIs,
+  enableChunksAPI,
 } from 'shared/ReactFeatureFlags';
-
 const React = {
   Children: {
     map,
@@ -72,9 +82,6 @@ const React = {
   forwardRef,
   lazy,
   memo,
-
-  error,
-  warn,
 
   useCallback,
   useContext,
@@ -99,20 +106,37 @@ const React = {
 
   version: ReactVersion,
 
-  unstable_ConcurrentMode: REACT_CONCURRENT_MODE_TYPE,
-
   __SECRET_INTERNALS_DO_NOT_USE_OR_YOU_WILL_BE_FIRED: ReactSharedInternals,
 };
+
+if (exposeConcurrentModeAPIs) {
+  React.useTransition = useTransition;
+  React.useDeferredValue = useDeferredValue;
+  React.SuspenseList = REACT_SUSPENSE_LIST_TYPE;
+  React.unstable_withSuspenseConfig = withSuspenseConfig;
+}
+
+if (enableChunksAPI) {
+  React.chunk = chunk;
+}
+
+if (enableDeprecatedFlareAPI) {
+  React.DEPRECATED_useResponder = useResponder;
+  React.DEPRECATED_createResponder = createResponder;
+}
+
+if (enableFundamentalAPI) {
+  React.unstable_createFundamental = createFundamental;
+}
+
+if (enableScopeAPI) {
+  React.unstable_createScope = createScope;
+}
 
 // Note: some APIs are added with feature flags.
 // Make sure that stable builds for open source
 // don't modify the React object to avoid deopts.
 // Also let's not expose their names in stable builds.
-
-if (enableStableConcurrentModeAPIs) {
-  React.ConcurrentMode = REACT_CONCURRENT_MODE_TYPE;
-  React.unstable_ConcurrentMode = undefined;
-}
 
 if (enableJSXTransformAPI) {
   if (__DEV__) {

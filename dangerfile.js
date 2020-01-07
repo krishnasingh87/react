@@ -32,15 +32,27 @@ const {generateResultsArray} = require('./scripts/rollup/stats');
 const {existsSync, readFileSync} = require('fs');
 const {exec} = require('child_process');
 
-if (!existsSync('./scripts/rollup/results.json')) {
+// This must match the name of the CI job that creates the build artifacts
+const RELEASE_CHANNEL =
+  process.env.RELEASE_CHANNEL === 'experimental' ? 'experimental' : 'stable';
+const artifactsJobName =
+  process.env.RELEASE_CHANNEL === 'experimental'
+    ? 'process_artifacts_experimental'
+    : 'process_artifacts';
+
+if (!existsSync('./build/bundle-sizes.json')) {
   // This indicates the build failed previously.
   // In that case, there's nothing for the Dangerfile to do.
   // Exit early to avoid leaving a redundant (and potentially confusing) PR comment.
+  warn(
+    'No bundle size information found. This indicates the build ' +
+      'job failed.'
+  );
   process.exit(0);
 }
 
 const currentBuildResults = JSON.parse(
-  readFileSync('./scripts/rollup/results.json')
+  readFileSync('./build/bundle-sizes.json')
 );
 
 /**
@@ -113,29 +125,35 @@ function git(args) {
     return;
   }
 
+  markdown(`## Size changes (${RELEASE_CHANNEL})`);
+
   const upstreamRef = danger.github.pr.base.ref;
   await git(`remote add upstream https://github.com/facebook/react.git`);
   await git('fetch upstream');
   const baseCommit = await git(`merge-base HEAD upstream/${upstreamRef}`);
 
-  let resultsResponse = null;
+  let previousBuildResults = null;
   try {
     let baseCIBuildId = null;
     const statusesResponse = await fetch(
-      `https://api.github.com/repos/facebook/react/commits/${baseCommit}/statuses`
+      `https://api.github.com/repos/facebook/react/commits/${baseCommit}/status`
     );
-    const statuses = await statusesResponse.json();
+    const {statuses, state} = await statusesResponse.json();
+    if (state === 'failure') {
+      warn(`Base commit is broken: ${baseCommit}`);
+      return;
+    }
     for (let i = 0; i < statuses.length; i++) {
       const status = statuses[i];
-      if (status.context === 'ci/circleci') {
+      if (status.context === `ci/circleci: ${artifactsJobName}`) {
         if (status.state === 'success') {
           baseCIBuildId = /\/facebook\/react\/([0-9]+)/.exec(
             status.target_url
           )[1];
           break;
         }
-        if (status.state === 'failure') {
-          warn(`Base commit is broken: ${baseCommit}`);
+        if (status.state === 'pending') {
+          warn(`Build job for base commit is still pending: ${baseCommit}`);
           return;
         }
       }
@@ -153,8 +171,9 @@ function git(args) {
 
     for (let i = 0; i < baseArtifactsInfo.length; i++) {
       const info = baseArtifactsInfo[i];
-      if (info.path === 'home/circleci/project/scripts/rollup/results.json') {
-        resultsResponse = await fetch(info.url);
+      if (info.path === 'home/circleci/project/build/bundle-sizes.json') {
+        const resultsResponse = await fetch(info.url);
+        previousBuildResults = await resultsResponse.json();
         break;
       }
     }
@@ -163,14 +182,13 @@ function git(args) {
     return;
   }
 
-  if (resultsResponse === null) {
+  if (previousBuildResults === null) {
     warn(`Could not find build artifacts for base commit: ${baseCommit}`);
     return;
   }
 
   // Take the JSON of the build response and
   // make an array comparing the results for printing
-  const previousBuildResults = await resultsResponse.json();
   const results = generateResultsArray(
     currentBuildResults,
     previousBuildResults
@@ -271,5 +289,7 @@ function git(args) {
   </details>
   `;
     markdown(summary);
+  } else {
+    markdown('No significant bundle size changes to report.');
   }
 })();
