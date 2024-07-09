@@ -1,5 +1,5 @@
 /**
- * Copyright (c) Facebook, Inc. and its affiliates.
+ * Copyright (c) Meta Platforms, Inc. and affiliates.
  *
  * This source code is licensed under the MIT license found in the
  * LICENSE file in the root directory of this source tree.
@@ -7,57 +7,18 @@
  * @flow
  */
 
-import type {Fiber} from './ReactFiber';
+import type {Fiber} from './ReactInternalTypes';
 
 import ReactSharedInternals from 'shared/ReactSharedInternals';
 import {
-  HostRoot,
-  HostPortal,
-  HostText,
-  Fragment,
-  ContextProvider,
-  ContextConsumer,
-} from 'shared/ReactWorkTags';
-import describeComponentFrame from 'shared/describeComponentFrame';
-import getComponentName from 'shared/getComponentName';
-
-const ReactDebugCurrentFrame = ReactSharedInternals.ReactDebugCurrentFrame;
-
-type LifeCyclePhase = 'render' | 'getChildContext';
-
-function describeFiber(fiber: Fiber): string {
-  switch (fiber.tag) {
-    case HostRoot:
-    case HostPortal:
-    case HostText:
-    case Fragment:
-    case ContextProvider:
-    case ContextConsumer:
-      return '';
-    default:
-      const owner = fiber._debugOwner;
-      const source = fiber._debugSource;
-      const name = getComponentName(fiber.type);
-      let ownerName = null;
-      if (owner) {
-        ownerName = getComponentName(owner.type);
-      }
-      return describeComponentFrame(name, source, ownerName);
-  }
-}
-
-export function getStackByFiberInDevAndProd(workInProgress: Fiber): string {
-  let info = '';
-  let node = workInProgress;
-  do {
-    info += describeFiber(node);
-    node = node.return;
-  } while (node);
-  return info;
-}
+  getStackByFiberInDevAndProd,
+  getOwnerStackByFiberInDev,
+} from './ReactFiberComponentStack';
+import {getComponentNameFromOwner} from 'react-reconciler/src/getComponentNameFromFiber';
+import {enableOwnerStacks} from 'shared/ReactFeatureFlags';
 
 export let current: Fiber | null = null;
-export let phase: LifeCyclePhase | null = null;
+export let isRendering: boolean = false;
 
 export function getCurrentFiberOwnerNameInDevOrNull(): string | null {
   if (__DEV__) {
@@ -65,43 +26,98 @@ export function getCurrentFiberOwnerNameInDevOrNull(): string | null {
       return null;
     }
     const owner = current._debugOwner;
-    if (owner !== null && typeof owner !== 'undefined') {
-      return getComponentName(owner.type);
+    if (owner != null) {
+      return getComponentNameFromOwner(owner);
     }
   }
   return null;
 }
 
-export function getCurrentFiberStackInDev(): string {
+export function getCurrentParentStackInDev(): string {
+  // This is used to get the parent stack even with owner stacks turned on.
+  if (__DEV__) {
+    if (current === null) {
+      return '';
+    }
+    return getStackByFiberInDevAndProd(current);
+  }
+  return '';
+}
+
+function getCurrentFiberStackInDev(stack: null | Error): string {
   if (__DEV__) {
     if (current === null) {
       return '';
     }
     // Safe because if current fiber exists, we are reconciling,
     // and it is guaranteed to be the work-in-progress version.
+    // TODO: The above comment is not actually true. We might be
+    // in a commit phase or preemptive set state callback.
+    if (enableOwnerStacks) {
+      return getOwnerStackByFiberInDev(current, stack);
+    }
     return getStackByFiberInDevAndProd(current);
   }
   return '';
 }
 
+export function runWithFiberInDEV<A0, A1, A2, A3, A4, T>(
+  fiber: null | Fiber,
+  callback: (A0, A1, A2, A3, A4) => T,
+  arg0: A0,
+  arg1: A1,
+  arg2: A2,
+  arg3: A3,
+  arg4: A4,
+): T {
+  if (__DEV__) {
+    const previousFiber = current;
+    setCurrentFiber(fiber);
+    try {
+      if (enableOwnerStacks) {
+        if (fiber !== null && fiber._debugTask) {
+          return fiber._debugTask.run(
+            callback.bind(null, arg0, arg1, arg2, arg3, arg4),
+          );
+        }
+      }
+      return callback(arg0, arg1, arg2, arg3, arg4);
+    } finally {
+      current = previousFiber;
+    }
+  }
+  // These errors should never make it into a build so we don't need to encode them in codes.json
+  // eslint-disable-next-line react-internal/prod-error-codes
+  throw new Error(
+    'runWithFiberInDEV should never be called in production. This is a bug in React.',
+  );
+}
+
 export function resetCurrentFiber() {
   if (__DEV__) {
-    ReactDebugCurrentFrame.getCurrentStack = null;
-    current = null;
-    phase = null;
+    ReactSharedInternals.getCurrentStack = null;
+    isRendering = false;
+  }
+  current = null;
+}
+
+export function setCurrentFiber(fiber: Fiber | null) {
+  if (__DEV__) {
+    ReactSharedInternals.getCurrentStack =
+      fiber === null ? null : getCurrentFiberStackInDev;
+    isRendering = false;
+  }
+  current = fiber;
+}
+
+export function setIsRendering(rendering: boolean) {
+  if (__DEV__) {
+    isRendering = rendering;
   }
 }
 
-export function setCurrentFiber(fiber: Fiber) {
+export function getIsRendering(): void | boolean {
   if (__DEV__) {
-    ReactDebugCurrentFrame.getCurrentStack = getCurrentFiberStackInDev;
-    current = fiber;
-    phase = null;
-  }
-}
-
-export function setCurrentPhase(lifeCyclePhase: LifeCyclePhase | null) {
-  if (__DEV__) {
-    phase = lifeCyclePhase;
+    return isRendering;
   }
 }

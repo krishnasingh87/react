@@ -1,5 +1,5 @@
 /**
- * Copyright (c) Facebook, Inc. and its affiliates.
+ * Copyright (c) Meta Platforms, Inc. and affiliates.
  *
  * This source code is licensed under the MIT license found in the
  * LICENSE file in the root directory of this source tree.
@@ -7,7 +7,7 @@
  * @flow
  */
 
-import EventEmitter from 'events';
+import EventEmitter from '../events';
 import {prepareProfilingDataFrontendFromBackendAndStore} from './views/Profiler/utils';
 import ProfilingCache from './ProfilingCache';
 import Store from './store';
@@ -21,11 +21,11 @@ import type {
   SnapshotNode,
 } from './views/Profiler/types';
 
-export default class ProfilerStore extends EventEmitter<{|
+export default class ProfilerStore extends EventEmitter<{
   isProcessingData: [],
   isProfiling: [],
   profilingData: [],
-|}> {
+}> {
   _bridge: FrontendBridge;
 
   // Suspense cache for lazily calculating derived profiling data.
@@ -113,7 +113,7 @@ export default class ProfilerStore extends EventEmitter<{|
     }
 
     throw Error(
-      `Could not find commit data for root "${rootID}" and commit ${commitIndex}`,
+      `Could not find commit data for root "${rootID}" and commit "${commitIndex}"`,
     );
   }
 
@@ -201,18 +201,20 @@ export default class ProfilerStore extends EventEmitter<{|
     // We do this to avoid mismatches on e.g. CommitTreeBuilder that would cause errors.
   }
 
-  _takeProfilingSnapshotRecursive = (
+  _takeProfilingSnapshotRecursive: (
     elementID: number,
     profilingSnapshots: Map<number, SnapshotNode>,
-  ) => {
+  ) => void = (elementID, profilingSnapshots) => {
     const element = this._store.getElementByID(elementID);
     if (element !== null) {
       const snapshotNode: SnapshotNode = {
         id: elementID,
         children: element.children.slice(0),
         displayName: element.displayName,
+        hocDisplayNames: element.hocDisplayNames,
         key: element.key,
         type: element.type,
+        compiledWithForget: element.compiledWithForget,
       };
       profilingSnapshots.set(elementID, snapshotNode);
 
@@ -222,7 +224,7 @@ export default class ProfilerStore extends EventEmitter<{|
     }
   };
 
-  onBridgeOperations = (operations: Array<number>) => {
+  onBridgeOperations: (operations: Array<number>) => void = operations => {
     // The first two values are always rendererID and rootID
     const rendererID = operations[0];
     const rootID = operations[1];
@@ -248,44 +250,45 @@ export default class ProfilerStore extends EventEmitter<{|
     }
   };
 
-  onBridgeProfilingData = (dataBackend: ProfilingDataBackend) => {
-    if (this._isProfiling) {
-      // This should never happen, but if it does- ignore previous profiling data.
-      return;
-    }
+  onBridgeProfilingData: (dataBackend: ProfilingDataBackend) => void =
+    dataBackend => {
+      if (this._isProfiling) {
+        // This should never happen, but if it does- ignore previous profiling data.
+        return;
+      }
 
-    const {rendererID} = dataBackend;
+      const {rendererID} = dataBackend;
 
-    if (!this._rendererQueue.has(rendererID)) {
-      throw Error(
-        `Unexpected profiling data update from renderer "${rendererID}"`,
-      );
-    }
+      if (!this._rendererQueue.has(rendererID)) {
+        throw Error(
+          `Unexpected profiling data update from renderer "${rendererID}"`,
+        );
+      }
 
-    this._dataBackends.push(dataBackend);
-    this._rendererQueue.delete(rendererID);
+      this._dataBackends.push(dataBackend);
+      this._rendererQueue.delete(rendererID);
 
-    if (this._rendererQueue.size === 0) {
-      this._dataFrontend = prepareProfilingDataFrontendFromBackendAndStore(
-        this._dataBackends,
-        this._inProgressOperationsByRootID,
-        this._initialSnapshotsByRootID,
-      );
+      if (this._rendererQueue.size === 0) {
+        this._dataFrontend = prepareProfilingDataFrontendFromBackendAndStore(
+          this._dataBackends,
+          this._inProgressOperationsByRootID,
+          this._initialSnapshotsByRootID,
+        );
 
-      this._dataBackends.splice(0);
+        this._dataBackends.splice(0);
 
-      this.emit('isProcessingData');
-    }
-  };
+        this.emit('isProcessingData');
+      }
+    };
 
-  onBridgeShutdown = () => {
+  onBridgeShutdown: () => void = () => {
     this._bridge.removeListener('operations', this.onBridgeOperations);
     this._bridge.removeListener('profilingData', this.onBridgeProfilingData);
     this._bridge.removeListener('profilingStatus', this.onProfilingStatus);
     this._bridge.removeListener('shutdown', this.onBridgeShutdown);
   };
 
-  onProfilingStatus = (isProfiling: boolean) => {
+  onProfilingStatus: (isProfiling: boolean) => void = isProfiling => {
     if (isProfiling) {
       this._dataBackends.splice(0);
       this._dataFrontend = null;
@@ -297,7 +300,7 @@ export default class ProfilerStore extends EventEmitter<{|
 
       // Record all renderer IDs initially too (in case of unmount)
       // eslint-disable-next-line no-for-of-loops/no-for-of-loops
-      for (let rendererID of this._store.rootIDToRendererID.values()) {
+      for (const rendererID of this._store.rootIDToRendererID.values()) {
         if (!this._initialRendererIDs.has(rendererID)) {
           this._initialRendererIDs.add(rendererID);
         }
@@ -306,7 +309,7 @@ export default class ProfilerStore extends EventEmitter<{|
       // Record snapshot of tree at the time profiling is started.
       // This info is required to handle cases of e.g. nodes being removed during profiling.
       this._store.roots.forEach(rootID => {
-        const profilingSnapshots = new Map();
+        const profilingSnapshots = new Map<number, SnapshotNode>();
         this._initialSnapshotsByRootID.set(rootID, profilingSnapshots);
         this._takeProfilingSnapshotRecursive(rootID, profilingSnapshots);
       });

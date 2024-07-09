@@ -1,5 +1,5 @@
 /**
- * Copyright (c) Facebook, Inc. and its affiliates.
+ * Copyright (c) Meta Platforms, Inc. and affiliates.
  *
  * This source code is licensed under the MIT license found in the
  * LICENSE file in the root directory of this source tree.
@@ -10,7 +10,9 @@
 'use strict';
 
 let React;
-let ReactDOM;
+let ReactDOMClient;
+let act;
+let root;
 
 const ChildComponent = ({id, eventHandler}) => (
   <div
@@ -68,9 +70,10 @@ describe('ReactTreeTraversal', () => {
   let outerNode1;
   let outerNode2;
 
-  beforeEach(() => {
+  beforeEach(async () => {
     React = require('react');
-    ReactDOM = require('react-dom');
+    ReactDOMClient = require('react-dom/client');
+    act = require('internal-test-utils').act;
 
     mockFn.mockReset();
 
@@ -81,7 +84,10 @@ describe('ReactTreeTraversal', () => {
     document.body.appendChild(outerNode1);
     document.body.appendChild(outerNode2);
 
-    ReactDOM.render(<ParentComponent eventHandler={mockFn} />, container);
+    root = ReactDOMClient.createRoot(container);
+    await act(() => {
+      root.render(<ParentComponent eventHandler={mockFn} />);
+    });
   });
 
   afterEach(() => {
@@ -203,6 +209,9 @@ describe('ReactTreeTraversal', () => {
       expect(mockFn.mock.calls).toEqual(expectedCalls);
     });
 
+    // The modern event system attaches event listeners to roots so the
+    // event below is being triggered on a node that React does not listen
+    // to any more. Instead we should fire mouseover.
     it('should enter from the window', () => {
       const enterNode = document.getElementById('P_P1_C1__DIV');
 
@@ -212,11 +221,11 @@ describe('ReactTreeTraversal', () => {
         ['P_P1_C1__DIV', 'mouseenter'],
       ];
 
-      outerNode1.dispatchEvent(
-        new MouseEvent('mouseout', {
+      enterNode.dispatchEvent(
+        new MouseEvent('mouseover', {
           bubbles: true,
           cancelable: true,
-          relatedTarget: enterNode,
+          relatedTarget: outerNode1,
         }),
       );
 
@@ -228,11 +237,11 @@ describe('ReactTreeTraversal', () => {
 
       const expectedCalls = [['P', 'mouseenter']];
 
-      outerNode1.dispatchEvent(
-        new MouseEvent('mouseout', {
+      enterNode.dispatchEvent(
+        new MouseEvent('mouseover', {
           bubbles: true,
           cancelable: true,
-          relatedTarget: enterNode,
+          relatedTarget: outerNode1,
         }),
       );
 

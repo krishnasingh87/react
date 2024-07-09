@@ -1,5 +1,5 @@
 /**
- * Copyright (c) Facebook, Inc. and its affiliates.
+ * Copyright (c) Meta Platforms, Inc. and affiliates.
  *
  * This source code is licensed under the MIT license found in the
  * LICENSE file in the root directory of this source tree.
@@ -7,35 +7,32 @@
  * @flow
  */
 
-import type {Fiber} from './ReactFiber';
+import type {Fiber} from './ReactInternalTypes';
 import type {StackCursor} from './ReactFiberStack';
 
-import {isFiberMounted} from 'react-reconciler/reflection';
+import {isFiberMounted} from './ReactFiberTreeReflection';
 import {disableLegacyContext} from 'shared/ReactFeatureFlags';
-import {ClassComponent, HostRoot} from 'shared/ReactWorkTags';
-import getComponentName from 'shared/getComponentName';
-import invariant from 'shared/invariant';
-import checkPropTypes from 'prop-types/checkPropTypes';
+import {ClassComponent, HostRoot} from './ReactWorkTags';
+import getComponentNameFromFiber from 'react-reconciler/src/getComponentNameFromFiber';
 
-import {setCurrentPhase, getCurrentFiberStackInDev} from './ReactCurrentFiber';
-import {startPhaseTimer, stopPhaseTimer} from './ReactDebugFiberPerf';
 import {createCursor, push, pop} from './ReactFiberStack';
 
 let warnedAboutMissingGetChildContext;
 
 if (__DEV__) {
-  warnedAboutMissingGetChildContext = {};
+  warnedAboutMissingGetChildContext = ({}: {[string]: boolean});
 }
 
-export const emptyContextObject = {};
+export const emptyContextObject: {} = {};
 if (__DEV__) {
   Object.freeze(emptyContextObject);
 }
 
 // A cursor to the current merged context object on the stack.
-let contextStackCursor: StackCursor<Object> = createCursor(emptyContextObject);
+const contextStackCursor: StackCursor<Object> =
+  createCursor(emptyContextObject);
 // A cursor to a boolean indicating whether the context has changed.
-let didPerformWorkStackCursor: StackCursor<boolean> = createCursor(false);
+const didPerformWorkStackCursor: StackCursor<boolean> = createCursor(false);
 // Keep track of the previous context object that was on the stack.
 // We use this to get access to the parent context after we have already
 // pushed the next context provider, and now need to merge their contexts.
@@ -98,20 +95,9 @@ function getMaskedContext(
       return instance.__reactInternalMemoizedMaskedChildContext;
     }
 
-    const context = {};
-    for (let key in contextTypes) {
+    const context: {[string]: $FlowFixMe} = {};
+    for (const key in contextTypes) {
       context[key] = unmaskedContext[key];
-    }
-
-    if (__DEV__) {
-      const name = getComponentName(type) || 'Unknown';
-      checkPropTypes(
-        contextTypes,
-        context,
-        'context',
-        name,
-        getCurrentFiberStackInDev,
-      );
     }
 
     // Cache unmasked context so we can avoid recreating masked context unless necessary.
@@ -167,11 +153,12 @@ function pushTopLevelContextObject(
   if (disableLegacyContext) {
     return;
   } else {
-    invariant(
-      contextStackCursor.current === emptyContextObject,
-      'Unexpected context found on stack. ' +
-        'This error is likely caused by a bug in React. Please file an issue.',
-    );
+    if (contextStackCursor.current !== emptyContextObject) {
+      throw new Error(
+        'Unexpected context found on stack. ' +
+          'This error is likely caused by a bug in React. Please file an issue.',
+      );
+    }
 
     push(contextStackCursor, context, fiber);
     push(didPerformWorkStackCursor, didChange, fiber);
@@ -193,7 +180,7 @@ function processChildContext(
     // It has only been added in Fiber to match the (unintentional) behavior in Stack.
     if (typeof instance.getChildContext !== 'function') {
       if (__DEV__) {
-        const componentName = getComponentName(type) || 'Unknown';
+        const componentName = getComponentNameFromFiber(fiber) || 'Unknown';
 
         if (!warnedAboutMissingGetChildContext[componentName]) {
           warnedAboutMissingGetChildContext[componentName] = true;
@@ -209,38 +196,15 @@ function processChildContext(
       return parentContext;
     }
 
-    let childContext;
-    if (__DEV__) {
-      setCurrentPhase('getChildContext');
-    }
-    startPhaseTimer(fiber, 'getChildContext');
-    childContext = instance.getChildContext();
-    stopPhaseTimer();
-    if (__DEV__) {
-      setCurrentPhase(null);
-    }
-    for (let contextKey in childContext) {
-      invariant(
-        contextKey in childContextTypes,
-        '%s.getChildContext(): key "%s" is not defined in childContextTypes.',
-        getComponentName(type) || 'Unknown',
-        contextKey,
-      );
-    }
-    if (__DEV__) {
-      const name = getComponentName(type) || 'Unknown';
-      checkPropTypes(
-        childContextTypes,
-        childContext,
-        'child context',
-        name,
-        // In practice, there is one case in which we won't get a stack. It's when
-        // somebody calls unstable_renderSubtreeIntoContainer() and we process
-        // context from the parent component instance. The stack will be missing
-        // because it's outside of the reconciliation, and so the pointer has not
-        // been set. This is rare and doesn't matter. We'll also remove that API.
-        getCurrentFiberStackInDev,
-      );
+    const childContext = instance.getChildContext();
+    for (const contextKey in childContext) {
+      if (!(contextKey in childContextTypes)) {
+        throw new Error(
+          `${
+            getComponentNameFromFiber(fiber) || 'Unknown'
+          }.getChildContext(): key "${contextKey}" is not defined in childContextTypes.`,
+        );
+      }
     }
 
     return {...parentContext, ...childContext};
@@ -282,11 +246,13 @@ function invalidateContextProvider(
     return;
   } else {
     const instance = workInProgress.stateNode;
-    invariant(
-      instance,
-      'Expected to have an instance by this point. ' +
-        'This error is likely caused by a bug in React. Please file an issue.',
-    );
+
+    if (!instance) {
+      throw new Error(
+        'Expected to have an instance by this point. ' +
+          'This error is likely caused by a bug in React. Please file an issue.',
+      );
+    }
 
     if (didChange) {
       // Merge parent and own context.
@@ -319,13 +285,14 @@ function findCurrentUnmaskedContext(fiber: Fiber): Object {
   } else {
     // Currently this is only used with renderSubtreeIntoContainer; not sure if it
     // makes sense elsewhere
-    invariant(
-      isFiberMounted(fiber) && fiber.tag === ClassComponent,
-      'Expected subtree parent to be a mounted class component. ' +
-        'This error is likely caused by a bug in React. Please file an issue.',
-    );
+    if (!isFiberMounted(fiber) || fiber.tag !== ClassComponent) {
+      throw new Error(
+        'Expected subtree parent to be a mounted class component. ' +
+          'This error is likely caused by a bug in React. Please file an issue.',
+      );
+    }
 
-    let node = fiber;
+    let node: Fiber = fiber;
     do {
       switch (node.tag) {
         case HostRoot:
@@ -338,10 +305,11 @@ function findCurrentUnmaskedContext(fiber: Fiber): Object {
           break;
         }
       }
+      // $FlowFixMe[incompatible-type] we bail out when we get a null
       node = node.return;
     } while (node !== null);
-    invariant(
-      false,
+
+    throw new Error(
       'Found unexpected detached subtree parent. ' +
         'This error is likely caused by a bug in React. Please file an issue.',
     );

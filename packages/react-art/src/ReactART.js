@@ -1,21 +1,23 @@
 /**
- * Copyright (c) Facebook, Inc. and its affiliates.
+ * Copyright (c) Meta Platforms, Inc. and affiliates.
  *
  * This source code is licensed under the MIT license found in the
  * LICENSE file in the root directory of this source tree.
  */
 
-import React from 'react';
+import * as React from 'react';
 import ReactVersion from 'shared/ReactVersion';
-import {LegacyRoot} from 'shared/ReactRootTags';
+import {LegacyRoot, ConcurrentRoot} from 'react-reconciler/src/ReactRootTags';
 import {
   createContainer,
-  updateContainer,
+  updateContainerSync,
   injectIntoDevTools,
-} from 'react-reconciler/inline.art';
+  flushSyncWork,
+} from 'react-reconciler/src/ReactFiberReconciler';
 import Transform from 'art/core/transform';
 import Mode from 'art/modes/current';
 import FastNoSideEffects from 'art/modes/fast-noSideEffects';
+import {disableLegacyMode} from 'shared/ReactFeatureFlags';
 
 import {TYPES, childrenAsString} from './ReactARTInternals';
 
@@ -66,8 +68,18 @@ class Surface extends React.Component {
 
     this._surface = Mode.Surface(+width, +height, this._tagRef);
 
-    this._mountNode = createContainer(this._surface, LegacyRoot, false, null);
-    updateContainer(this.props.children, this._mountNode, this);
+    this._mountNode = createContainer(
+      this._surface,
+      disableLegacyMode ? ConcurrentRoot : LegacyRoot,
+      null,
+      false,
+      false,
+      '',
+    );
+    // We synchronously flush updates coming from above so that they commit together
+    // and so that refs resolve before the parent life cycles.
+    updateContainerSync(this.props.children, this._mountNode, this);
+    flushSyncWork();
   }
 
   componentDidUpdate(prevProps, prevState) {
@@ -77,7 +89,10 @@ class Surface extends React.Component {
       this._surface.resize(+props.width, +props.height);
     }
 
-    updateContainer(this.props.children, this._mountNode, this);
+    // We synchronously flush updates coming from above so that they commit together
+    // and so that refs resolve before the parent life cycles.
+    updateContainerSync(this.props.children, this._mountNode, this);
+    flushSyncWork();
 
     if (this._surface.render) {
       this._surface.render();
@@ -85,7 +100,10 @@ class Surface extends React.Component {
   }
 
   componentWillUnmount() {
-    updateContainer(null, this._mountNode, this);
+    // We synchronously flush updates coming from above so that they commit together
+    // and so that refs resolve before the parent life cycles.
+    updateContainerSync(null, this._mountNode, this);
+    flushSyncWork();
   }
 
   render() {
@@ -120,7 +138,7 @@ class Text extends React.Component {
     // ref directly.
     ['height', 'width', 'x', 'y'].forEach(key => {
       Object.defineProperty(this, key, {
-        get: function() {
+        get: function () {
           return this._text ? this._text[key] : undefined;
         },
       });

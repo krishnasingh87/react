@@ -1,5 +1,5 @@
 /**
- * Copyright (c) Facebook, Inc. and its affiliates.
+ * Copyright (c) Meta Platforms, Inc. and affiliates.
  *
  * This source code is licensed under the MIT license found in the
  * LICENSE file in the root directory of this source tree.
@@ -7,14 +7,15 @@
  * @flow
  */
 
-import React, {useCallback, useContext, useMemo, useRef} from 'react';
+import * as React from 'react';
+import {useCallback, useContext, useMemo, useRef} from 'react';
 import {useSubscription} from '../hooks';
 import {StoreContext} from '../context';
 import {ProfilerContext} from 'react-devtools-shared/src/devtools/views/Profiler/ProfilerContext';
 
 import styles from './SettingsShared.css';
 
-export default function ProfilerSettings(_: {||}) {
+export default function ProfilerSettings(_: {}): React.Node {
   const {
     isCommitFilterEnabled,
     minCommitDuration,
@@ -38,7 +39,7 @@ export default function ProfilerSettings(_: {||}) {
   );
 
   const updateRecordChangeDescriptions = useCallback(
-    ({currentTarget}) => {
+    ({currentTarget}: $FlowFixMe) => {
       store.recordChangeDescriptions = currentTarget.checked;
     },
     [store],

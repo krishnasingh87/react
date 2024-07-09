@@ -1,5 +1,5 @@
 /**
- * Copyright (c) Facebook, Inc. and its affiliates.
+ * Copyright (c) Meta Platforms, Inc. and affiliates.
  *
  * This source code is licensed under the MIT license found in the
  * LICENSE file in the root directory of this source tree.
@@ -7,14 +7,14 @@
  * @flow
  */
 
-import React, {
+import * as React from 'react';
+import {
   createContext,
   forwardRef,
   lazy,
   memo,
   Component,
   Fragment,
-  // $FlowFixMe Flow doesn't know about the Profiler import yet
   Profiler,
   StrictMode,
   Suspense,
@@ -24,7 +24,7 @@ const Context = createContext('abc');
 Context.displayName = 'ExampleContext';
 
 class ClassComponent extends Component<any> {
-  render() {
+  render(): null {
     return null;
   }
 }
@@ -35,16 +35,16 @@ function FunctionComponent() {
 
 const MemoFunctionComponent = memo(FunctionComponent);
 
-const FowardRefComponentWithAnonymousFunction = forwardRef((props, ref) => (
+const ForwardRefComponentWithAnonymousFunction = forwardRef((props, ref) => (
   <ClassComponent ref={ref} {...props} />
 ));
 const ForwardRefComponent = forwardRef(function NamedInnerFunction(props, ref) {
   return <ClassComponent ref={ref} {...props} />;
 });
-const FowardRefComponentWithCustomDisplayName = forwardRef((props, ref) => (
+const ForwardRefComponentWithCustomDisplayName = forwardRef((props, ref) => (
   <ClassComponent ref={ref} {...props} />
 ));
-FowardRefComponentWithCustomDisplayName.displayName = 'Custom';
+ForwardRefComponentWithCustomDisplayName.displayName = 'Custom';
 
 const LazyComponent = lazy(() =>
   Promise.resolve({
@@ -52,12 +52,12 @@ const LazyComponent = lazy(() =>
   }),
 );
 
-export default function ElementTypes() {
+export default function ElementTypes(): React.Node {
   return (
     <Profiler id="test" onRender={() => {}}>
       <Fragment>
         <Context.Provider value={'def'}>
-          <Context.Consumer>{value => null}</Context.Consumer>
+          <Context.Consumer>{(value: $FlowFixMe) => null}</Context.Consumer>
         </Context.Provider>
         <StrictMode>
           <Suspense fallback={<div>Loading...</div>}>
@@ -65,8 +65,8 @@ export default function ElementTypes() {
             <FunctionComponent />
             <MemoFunctionComponent />
             <ForwardRefComponent />
-            <FowardRefComponentWithAnonymousFunction />
-            <FowardRefComponentWithCustomDisplayName />
+            <ForwardRefComponentWithAnonymousFunction />
+            <ForwardRefComponentWithCustomDisplayName />
             <LazyComponent />
           </Suspense>
         </StrictMode>

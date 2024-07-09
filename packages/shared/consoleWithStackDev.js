@@ -1,11 +1,19 @@
 /**
- * Copyright (c) Facebook, Inc. and its affiliates.
+ * Copyright (c) Meta Platforms, Inc. and affiliates.
  *
  * This source code is licensed under the MIT license found in the
  * LICENSE file in the root directory of this source tree.
  */
 
 import ReactSharedInternals from 'shared/ReactSharedInternals';
+import {enableOwnerStacks} from 'shared/ReactFeatureFlags';
+
+let suppressWarning = false;
+export function setSuppressWarning(newSuppressWarning) {
+  if (__DEV__) {
+    suppressWarning = newSuppressWarning;
+  }
+}
 
 // In DEV, calls to console.warn and console.error get replaced
 // by calls to these methods by a Babel plugin.
@@ -15,51 +23,46 @@ import ReactSharedInternals from 'shared/ReactSharedInternals';
 
 export function warn(format, ...args) {
   if (__DEV__) {
-    printWarning('warn', format, args);
+    if (!suppressWarning) {
+      printWarning('warn', format, args, new Error('react-stack-top-frame'));
+    }
   }
 }
 
 export function error(format, ...args) {
   if (__DEV__) {
-    printWarning('error', format, args);
+    if (!suppressWarning) {
+      printWarning('error', format, args, new Error('react-stack-top-frame'));
+    }
   }
 }
 
-function printWarning(level, format, args) {
+// eslint-disable-next-line react-internal/no-production-logging
+const supportsCreateTask = __DEV__ && enableOwnerStacks && !!console.createTask;
+
+export let isWritingAppendedStack = false;
+
+function printWarning(level, format, args, currentStack) {
   // When changing this logic, you might want to also
   // update consoleWithStackDev.www.js as well.
   if (__DEV__) {
-    const hasExistingStack =
-      args.length > 0 &&
-      typeof args[args.length - 1] === 'string' &&
-      args[args.length - 1].indexOf('\n    in') === 0;
-
-    if (!hasExistingStack) {
-      const ReactDebugCurrentFrame =
-        ReactSharedInternals.ReactDebugCurrentFrame;
-      const stack = ReactDebugCurrentFrame.getStackAddendum();
+    if (!supportsCreateTask && ReactSharedInternals.getCurrentStack) {
+      // We only add the current stack to the console when createTask is not supported.
+      // Since createTask requires DevTools to be open to work, this means that stacks
+      // can be lost while DevTools isn't open but we can't detect this.
+      const stack = ReactSharedInternals.getCurrentStack(currentStack);
       if (stack !== '') {
+        isWritingAppendedStack = true;
         format += '%s';
         args = args.concat([stack]);
       }
     }
 
-    const argsWithFormat = args.map(item => '' + item);
-    // Careful: RN currently depends on this prefix
-    argsWithFormat.unshift('Warning: ' + format);
+    args.unshift(format);
     // We intentionally don't use spread (or .apply) directly because it
     // breaks IE9: https://github.com/facebook/react/issues/13610
     // eslint-disable-next-line react-internal/no-production-logging
-    Function.prototype.apply.call(console[level], console, argsWithFormat);
-
-    try {
-      // --- Welcome to debugging React ---
-      // This error was thrown as a convenience so that you can use this stack
-      // to find the callsite that caused this warning to fire.
-      let argIndex = 0;
-      const message =
-        'Warning: ' + format.replace(/%s/g, () => args[argIndex++]);
-      throw new Error(message);
-    } catch (x) {}
+    Function.prototype.apply.call(console[level], console, args);
+    isWritingAppendedStack = false;
   }
 }

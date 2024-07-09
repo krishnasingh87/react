@@ -1,5 +1,5 @@
 /**
- * Copyright (c) Facebook, Inc. and its affiliates.
+ * Copyright (c) Meta Platforms, Inc. and affiliates.
  *
  * This source code is licensed under the MIT license found in the
  * LICENSE file in the root directory of this source tree.
@@ -7,10 +7,11 @@
  * @flow
  */
 
-import React, {Fragment, useState} from 'react';
+import * as React from 'react';
+import {Fragment, useState} from 'react';
 import {Button, Text, View} from 'react-native-web';
 
-export default function ReactNativeWeb() {
+export default function ReactNativeWeb(): React.Node {
   const [backgroundColor, setBackgroundColor] = useState('purple');
   const toggleColor = () =>
     setBackgroundColor(backgroundColor === 'purple' ? 'green' : 'purple');

@@ -1,9 +1,10 @@
 /** @flow */
 
-import React, {Fragment} from 'react';
-import ReactDOM from 'react-dom';
+import * as React from 'react';
+import {Fragment} from 'react';
+import {createPortal} from 'react-dom';
 
-export default function Iframe() {
+export default function Iframe(): React.Node {
   return (
     <Fragment>
       <h2>Iframe</h2>
@@ -18,12 +19,13 @@ export default function Iframe() {
 
 const iframeStyle = {border: '2px solid #eee', height: 80};
 
+// $FlowFixMe[missing-local-annot]
 function Frame(props) {
   const [element, setElement] = React.useState(null);
 
   const ref = React.useRef();
 
-  React.useLayoutEffect(function() {
+  React.useLayoutEffect(function () {
     const iframe = ref.current;
 
     if (iframe) {
@@ -55,7 +57,7 @@ function Frame(props) {
         style={iframeStyle}
       />
 
-      {element ? ReactDOM.createPortal(props.children, element) : null}
+      {element ? createPortal(props.children, element) : null}
     </Fragment>
   );
 }

@@ -1,5 +1,5 @@
 /**
- * Copyright (c) Facebook, Inc. and its affiliates.
+ * Copyright (c) Meta Platforms, Inc. and affiliates.
  *
  * This source code is licensed under the MIT license found in the
  * LICENSE file in the root directory of this source tree.
@@ -7,18 +7,27 @@
  * @flow
  */
 
-import React, {Fragment, useDebugValue, useState} from 'react';
+import * as React from 'react';
+import {Fragment, useDebugValue, useState} from 'react';
 
 const div = document.createElement('div');
-const exmapleFunction = () => {};
+const exampleFunction = () => {};
 const typedArray = new Uint8Array(3);
 typedArray[0] = 1;
 typedArray[1] = 2;
 typedArray[2] = 3;
 
 const arrayOfArrays = [
-  [['a', 'b', 'c'], ['d', 'e', 'f'], ['h', 'i', 'j']],
-  [['k', 'l', 'm'], ['n', 'o', 'p'], ['q', 'r', 's']],
+  [
+    ['a', 'b', 'c'],
+    ['d', 'e', 'f'],
+    ['h', 'i', 'j'],
+  ],
+  [
+    ['k', 'l', 'm'],
+    ['n', 'o', 'p'],
+    ['q', 'r', 's'],
+  ],
   [['t', 'u', 'v'], ['w', 'x', 'y'], ['z']],
   [],
 ];
@@ -97,13 +106,13 @@ function useInnerBaz() {
   return count;
 }
 
-export default function Hydration() {
+export default function Hydration(): React.Node {
   return (
     <Fragment>
       <h1>Hydration</h1>
       <DehydratableProps
         html_element={div}
-        fn={exmapleFunction}
+        fn={exampleFunction}
         symbol={Symbol('symbol')}
         react_element={<span />}
         array_buffer={typedArray.buffer}

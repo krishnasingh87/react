@@ -1,5 +1,5 @@
 /**
- * Copyright (c) Facebook, Inc. and its affiliates.
+ * Copyright (c) Meta Platforms, Inc. and affiliates.
  *
  * This source code is licensed under the MIT license found in the
  * LICENSE file in the root directory of this source tree.
@@ -7,37 +7,98 @@
  * @flow
  */
 
-import type {ReactContext} from 'shared/ReactTypes';
-import type {Source} from 'shared/ReactElementType';
-import type {Fiber} from 'react-reconciler/src/ReactFiber';
+/**
+ * WARNING:
+ * This file contains types that are conceptually related to React internals and
+ * DevTools backends, but can be passed to frontend via the bridge.
+ * Be mindful of backwards compatibility when making changes.
+ */
+
+import type {ReactContext, Wakeable} from 'shared/ReactTypes';
+import type {Fiber} from 'react-reconciler/src/ReactInternalTypes';
 import type {
   ComponentFilter,
   ElementType,
-} from 'react-devtools-shared/src/types';
-import type {Interaction} from 'react-devtools-shared/src/devtools/views/Profiler/types';
-import type {ResolveNativeStyle} from 'react-devtools-shared/src/backend/NativeStyleEditor/setupNativeStyleEditor';
+  Plugins,
+} from 'react-devtools-shared/src/frontend/types';
+import type {
+  ResolveNativeStyle,
+  SetupNativeStyleEditor,
+} from 'react-devtools-shared/src/backend/NativeStyleEditor/setupNativeStyleEditor';
+import type {InitBackend} from 'react-devtools-shared/src/backend';
+import type {TimelineDataExport} from 'react-devtools-timeline/src/types';
+import type {BrowserTheme} from 'react-devtools-shared/src/frontend/types';
+import type {BackendBridge} from 'react-devtools-shared/src/bridge';
+import type {Source} from 'react-devtools-shared/src/shared/types';
+import type Agent from './agent';
 
 type BundleType =
   | 0 // PROD
   | 1; // DEV
 
 export type WorkTag = number;
-export type SideEffectTag = number;
+export type WorkFlags = number;
 export type ExpirationTime = number;
+
+export type WorkTagMap = {
+  CacheComponent: WorkTag,
+  ClassComponent: WorkTag,
+  ContextConsumer: WorkTag,
+  ContextProvider: WorkTag,
+  CoroutineComponent: WorkTag,
+  CoroutineHandlerPhase: WorkTag,
+  DehydratedSuspenseComponent: WorkTag,
+  ForwardRef: WorkTag,
+  Fragment: WorkTag,
+  FunctionComponent: WorkTag,
+  HostComponent: WorkTag,
+  HostPortal: WorkTag,
+  HostRoot: WorkTag,
+  HostHoistable: WorkTag,
+  HostSingleton: WorkTag,
+  HostText: WorkTag,
+  IncompleteClassComponent: WorkTag,
+  IncompleteFunctionComponent: WorkTag,
+  IndeterminateComponent: WorkTag,
+  LazyComponent: WorkTag,
+  LegacyHiddenComponent: WorkTag,
+  MemoComponent: WorkTag,
+  Mode: WorkTag,
+  OffscreenComponent: WorkTag,
+  Profiler: WorkTag,
+  ScopeComponent: WorkTag,
+  SimpleMemoComponent: WorkTag,
+  SuspenseComponent: WorkTag,
+  SuspenseListComponent: WorkTag,
+  TracingMarkerComponent: WorkTag,
+  YieldComponent: WorkTag,
+  Throw: WorkTag,
+};
 
 // TODO: If it's useful for the frontend to know which types of data an Element has
 // (e.g. props, state, context, hooks) then we could add a bitmask field for this
 // to keep the number of attributes small.
-export type FiberData = {|
+export type FiberData = {
   key: string | null,
   displayName: string | null,
   type: ElementType,
-|};
+};
 
 export type NativeType = Object;
 export type RendererID = number;
 
 type Dispatcher = any;
+export type LegacyDispatcherRef = {current: null | Dispatcher};
+type SharedInternalsSubset = {
+  H: null | Dispatcher,
+  ...
+};
+export type CurrentDispatcherRef = SharedInternalsSubset;
+
+export type GetDisplayNameForFiberID = (
+  id: number,
+  findNearestUnfilteredAncestor?: boolean,
+) => string | null;
 
 export type GetFiberIDForNative = (
   component: NativeType,
@@ -46,15 +107,19 @@ export type GetFiberIDForNative = (
 export type FindNativeNodesForFiberID = (id: number) => ?Array<NativeType>;
 
 export type ReactProviderType<T> = {
-  $$typeof: Symbol | number,
+  $$typeof: symbol | number,
   _context: ReactContext<T>,
+  ...
 };
 
-export type ReactRenderer = {
-  findFiberByHostInstance: (hostInstance: NativeType) => ?Fiber,
-  version: string,
-  bundleType: BundleType,
+export type Lane = number;
+export type Lanes = number;
 
+export type ReactRenderer = {
+  findFiberByHostInstance: (hostInstance: NativeType) => Fiber | null,
+  version: string,
+  rendererPackageName: string,
+  bundleType: BundleType,
   // 16.9+
   overrideHookState?: ?(
     fiber: Object,
@@ -62,105 +127,146 @@ export type ReactRenderer = {
     path: Array<string | number>,
     value: any,
   ) => void,
-
+  // 17+
+  overrideHookStateDeletePath?: ?(
+    fiber: Object,
+    id: number,
+    path: Array<string | number>,
+  ) => void,
+  // 17+
+  overrideHookStateRenamePath?: ?(
+    fiber: Object,
+    id: number,
+    oldPath: Array<string | number>,
+    newPath: Array<string | number>,
+  ) => void,
   // 16.7+
   overrideProps?: ?(
     fiber: Object,
     path: Array<string | number>,
     value: any,
   ) => void,
-
+  // 17+
+  overridePropsDeletePath?: ?(
+    fiber: Object,
+    path: Array<string | number>,
+  ) => void,
+  // 17+
+  overridePropsRenamePath?: ?(
+    fiber: Object,
+    oldPath: Array<string | number>,
+    newPath: Array<string | number>,
+  ) => void,
   // 16.9+
   scheduleUpdate?: ?(fiber: Object) => void,
   setSuspenseHandler?: ?(shouldSuspend: (fiber: Object) => boolean) => void,
-
   // Only injected by React v16.8+ in order to support hooks inspection.
-  currentDispatcherRef?: {|current: null | Dispatcher|},
-
+  currentDispatcherRef?: LegacyDispatcherRef | CurrentDispatcherRef,
   // Only injected by React v16.9+ in DEV mode.
   // Enables DevTools to append owners-only component stack to error messages.
   getCurrentFiber?: () => Fiber | null,
-
+  // 17.0.2+
+  reconcilerVersion?: string,
   // Uniquely identifies React DOM v15.
   ComponentTree?: any,
-
   // Present for React DOM v12 (possibly earlier) through v15.
   Mount?: any,
+  // Only injected by React v17.0.3+ in DEV mode
+  setErrorHandler?: ?(shouldError: (fiber: Object) => ?boolean) => void,
+  // Intentionally opaque type to avoid coupling DevTools to different Fast Refresh versions.
+  scheduleRefresh?: Function,
+  // 18.0+
+  injectProfilingHooks?: (profilingHooks: DevToolsProfilingHooks) => void,
+  getLaneLabelMap?: () => Map<Lane, string> | null,
+  ...
 };
 
-export type ChangeDescription = {|
+export type ChangeDescription = {
   context: Array<string> | boolean | null,
   didHooksChange: boolean,
   isFirstMount: boolean,
   props: Array<string> | null,
   state: Array<string> | null,
-|};
+  hooks?: Array<number> | null,
+};
 
-export type CommitDataBackend = {|
+export type CommitDataBackend = {
   // Tuple of fiber ID and change description
   changeDescriptions: Array<[number, ChangeDescription]> | null,
   duration: number,
+  // Only available in certain (newer) React builds,
+  effectDuration: number | null,
   // Tuple of fiber ID and actual duration
   fiberActualDurations: Array<[number, number]>,
   // Tuple of fiber ID and computed "self" duration
   fiberSelfDurations: Array<[number, number]>,
-  interactionIDs: Array<number>,
+  // Only available in certain (newer) React builds,
+  passiveEffectDuration: number | null,
   priorityLevel: string | null,
   timestamp: number,
-|};
+  updaters: Array<SerializedElement> | null,
+};
 
-export type ProfilingDataForRootBackend = {|
+export type ProfilingDataForRootBackend = {
   commitData: Array<CommitDataBackend>,
   displayName: string,
   // Tuple of Fiber ID and base duration
   initialTreeBaseDurations: Array<[number, number]>,
-  // Tuple of Interaction ID and commit indices
-  interactionCommits: Array<[number, Array<number>]>,
-  interactions: Array<[number, Interaction]>,
   rootID: number,
-|};
+};
 
 // Profiling data collected by the renderer interface.
 // This information will be passed to the frontend and combined with info it collects.
-export type ProfilingDataBackend = {|
+export type ProfilingDataBackend = {
   dataForRoots: Array<ProfilingDataForRootBackend>,
   rendererID: number,
-|};
+  timelineData: TimelineDataExport | null,
+};
 
-export type PathFrame = {|
+export type PathFrame = {
   key: string | null,
   index: number,
   displayName: string | null,
-|};
+};
 
-export type PathMatch = {|
+export type PathMatch = {
   id: number,
   isFullMatch: boolean,
-|};
+};
 
-export type Owner = {|
+export type SerializedElement = {
   displayName: string | null,
   id: number,
+  key: number | string | null,
   type: ElementType,
-|};
+};
 
-export type OwnersList = {|
+export type OwnersList = {
   id: number,
-  owners: Array<Owner> | null,
-|};
+  owners: Array<SerializedElement> | null,
+};
 
-export type InspectedElement = {|
+export type InspectedElement = {
   id: number,
 
   displayName: string | null,
 
-  // Does the current renderer support editable hooks?
+  // Does the current renderer support editable hooks and function props?
   canEditHooks: boolean,
-
-  // Does the current renderer support editable function props?
   canEditFunctionProps: boolean,
 
-  // Is this Suspense, and can its value be overriden now?
+  // Does the current renderer support advanced editing interface?
+  canEditHooksAndDeletePaths: boolean,
+  canEditHooksAndRenamePaths: boolean,
+  canEditFunctionPropsDeletePaths: boolean,
+  canEditFunctionPropsRenamePaths: boolean,
+
+  // Is this Error, and can its value be overridden now?
+  canToggleError: boolean,
+  isErrored: boolean,
+  targetErrorBoundaryID: ?number,
+
+  // Is this Suspense, and can its value be overridden now?
   canToggleSuspense: boolean,
 
   // Can view component source location.
@@ -174,89 +280,141 @@ export type InspectedElement = {|
   hooks: Object | null,
   props: Object | null,
   state: Object | null,
+  key: number | string | null,
+  errors: Array<[string, number]>,
+  warnings: Array<[string, number]>,
 
   // List of owners
-  owners: Array<Owner> | null,
-
-  // Location of component in source coude.
+  owners: Array<SerializedElement> | null,
   source: Source | null,
 
   type: ElementType,
-|};
 
+  // Meta information about the root this element belongs to.
+  rootType: string | null,
+
+  // Meta information about the renderer that created this element.
+  rendererPackageName: string | null,
+  rendererVersion: string | null,
+
+  // UI plugins/visualizations for the inspected element.
+  plugins: Plugins,
+};
+
+export const InspectElementErrorType = 'error';
 export const InspectElementFullDataType = 'full-data';
 export const InspectElementNoChangeType = 'no-change';
 export const InspectElementNotFoundType = 'not-found';
-export const InspectElementHydratedPathType = 'hydrated-path';
 
-type InspectElementFullData = {|
+export type InspectElementError = {
   id: number,
+  responseID: number,
+  type: 'error',
+  errorType: 'user' | 'unknown-hook' | 'uncaught',
+  message: string,
+  stack?: string,
+};
+
+export type InspectElementFullData = {
+  id: number,
+  responseID: number,
   type: 'full-data',
   value: InspectedElement,
-|};
+};
 
-type InspectElementHydratedPath = {|
+export type InspectElementHydratedPath = {
   id: number,
+  responseID: number,
   type: 'hydrated-path',
   path: Array<string | number>,
   value: any,
-|};
+};
 
-type InspectElementNoChange = {|
+export type InspectElementNoChange = {
   id: number,
+  responseID: number,
   type: 'no-change',
-|};
+};
 
-type InspectElementNotFound = {|
+export type InspectElementNotFound = {
   id: number,
+  responseID: number,
   type: 'not-found',
-|};
+};
 
 export type InspectedElementPayload =
+  | InspectElementError
   | InspectElementFullData
   | InspectElementHydratedPath
   | InspectElementNoChange
   | InspectElementNotFound;
 
-export type InstanceAndStyle = {|
+export type InstanceAndStyle = {
   instance: Object | null,
   style: Object | null,
-|};
+};
+
+type Type = 'props' | 'hooks' | 'state' | 'context';
 
 export type RendererInterface = {
   cleanup: () => void,
-  copyElementPath: (id: number, path: Array<string | number>) => void,
+  clearErrorsAndWarnings: () => void,
+  clearErrorsForFiberID: (id: number) => void,
+  clearWarningsForFiberID: (id: number) => void,
+  deletePath: (
+    type: Type,
+    id: number,
+    hookID: ?number,
+    path: Array<string | number>,
+  ) => void,
   findNativeNodesForFiberID: FindNativeNodesForFiberID,
   flushInitialOperations: () => void,
   getBestMatchForTrackedPath: () => PathMatch | null,
+  getFiberForNative: (component: NativeType) => Fiber | null,
   getFiberIDForNative: GetFiberIDForNative,
+  getDisplayNameForFiberID: GetDisplayNameForFiberID,
   getInstanceAndStyle(id: number): InstanceAndStyle,
   getProfilingData(): ProfilingDataBackend,
-  getOwnersList: (id: number) => Array<Owner> | null,
+  getOwnersList: (id: number) => Array<SerializedElement> | null,
   getPathForElement: (id: number) => Array<PathFrame> | null,
+  getSerializedElementValueByPath: (
+    id: number,
+    path: Array<string | number>,
+  ) => ?string,
   handleCommitFiberRoot: (fiber: Object, commitPriority?: number) => void,
   handleCommitFiberUnmount: (fiber: Object) => void,
+  handlePostCommitFiberRoot: (fiber: Object) => void,
+  hasFiberWithId: (id: number) => boolean,
   inspectElement: (
+    requestID: number,
     id: number,
-    path?: Array<string | number>,
+    inspectedPaths: Object,
+    forceFullData: boolean,
   ) => InspectedElementPayload,
   logElementToConsole: (id: number) => void,
+  overrideError: (id: number, forceError: boolean) => void,
   overrideSuspense: (id: number, forceFallback: boolean) => void,
+  overrideValueAtPath: (
+    type: Type,
+    id: number,
+    hook: ?number,
+    path: Array<string | number>,
+    value: any,
+  ) => void,
+  patchConsoleForStrictMode: () => void,
   prepareViewAttributeSource: (
     id: number,
     path: Array<string | number>,
   ) => void,
   prepareViewElementSource: (id: number) => void,
-  renderer: ReactRenderer | null,
-  setInContext: (id: number, path: Array<string | number>, value: any) => void,
-  setInHook: (
+  renamePath: (
+    type: Type,
     id: number,
-    index: number,
-    path: Array<string | number>,
-    value: any,
+    hookID: ?number,
+    oldPath: Array<string | number>,
+    newPath: Array<string | number>,
   ) => void,
-  setInProps: (id: number, path: Array<string | number>, value: any) => void,
-  setInState: (id: number, path: Array<string | number>, value: any) => void,
+  renderer: ReactRenderer | null,
   setTraceUpdatesEnabled: (enabled: boolean) => void,
   setTrackedPath: (path: Array<PathFrame> | null) => void,
   startProfiling: (recordChangeDescriptions: boolean) => void,
@@ -266,15 +424,70 @@ export type RendererInterface = {
     path: Array<string | number>,
     count: number,
   ) => void,
+  unpatchConsoleForStrictMode: () => void,
   updateComponentFilters: (componentFilters: Array<ComponentFilter>) => void,
+
+  // Timeline profiler interface
+
+  ...
 };
 
 export type Handler = (data: any) => void;
 
+// Renderers use these APIs to report profiling data to DevTools at runtime.
+// They get passed from the DevTools backend to the reconciler during injection.
+export type DevToolsProfilingHooks = {
+  // Scheduling methods:
+  markRenderScheduled: (lane: Lane) => void,
+  markStateUpdateScheduled: (fiber: Fiber, lane: Lane) => void,
+  markForceUpdateScheduled: (fiber: Fiber, lane: Lane) => void,
+
+  // Work loop level methods:
+  markRenderStarted: (lanes: Lanes) => void,
+  markRenderYielded: () => void,
+  markRenderStopped: () => void,
+  markCommitStarted: (lanes: Lanes) => void,
+  markCommitStopped: () => void,
+  markLayoutEffectsStarted: (lanes: Lanes) => void,
+  markLayoutEffectsStopped: () => void,
+  markPassiveEffectsStarted: (lanes: Lanes) => void,
+  markPassiveEffectsStopped: () => void,
+
+  // Fiber level methods:
+  markComponentRenderStarted: (fiber: Fiber) => void,
+  markComponentRenderStopped: () => void,
+  markComponentErrored: (
+    fiber: Fiber,
+    thrownValue: mixed,
+    lanes: Lanes,
+  ) => void,
+  markComponentSuspended: (
+    fiber: Fiber,
+    wakeable: Wakeable,
+    lanes: Lanes,
+  ) => void,
+  markComponentLayoutEffectMountStarted: (fiber: Fiber) => void,
+  markComponentLayoutEffectMountStopped: () => void,
+  markComponentLayoutEffectUnmountStarted: (fiber: Fiber) => void,
+  markComponentLayoutEffectUnmountStopped: () => void,
+  markComponentPassiveEffectMountStarted: (fiber: Fiber) => void,
+  markComponentPassiveEffectMountStopped: () => void,
+  markComponentPassiveEffectUnmountStarted: (fiber: Fiber) => void,
+  markComponentPassiveEffectUnmountStopped: () => void,
+};
+
+export type DevToolsBackend = {
+  Agent: Class<Agent>,
+  Bridge: Class<BackendBridge>,
+  initBackend: InitBackend,
+  setupNativeStyleEditor?: SetupNativeStyleEditor,
+};
+
 export type DevToolsHook = {
-  listeners: {[key: string]: Array<Handler>},
+  listeners: {[key: string]: Array<Handler>, ...},
   rendererInterfaces: Map<RendererID, RendererInterface>,
   renderers: Map<RendererID, ReactRenderer>,
+  backends: Map<string, DevToolsBackend>,
 
   emit: (event: string, data: any) => void,
   getFiberRoots: (rendererID: RendererID) => Set<Object>,
@@ -299,4 +512,22 @@ export type DevToolsHook = {
     // Added in v16.9 to support Fast Refresh
     didError?: boolean,
   ) => void,
+
+  // Timeline internal module filtering
+  getInternalModuleRanges: () => Array<[string, string]>,
+  registerInternalModuleStart: (moduleStartError: Error) => void,
+  registerInternalModuleStop: (moduleStopError: Error) => void,
+
+  // Testing
+  dangerous_setTargetConsoleForTesting?: (fakeConsole: Object) => void,
+
+  ...
+};
+
+export type ConsolePatchSettings = {
+  appendComponentStack: boolean,
+  breakOnConsoleErrors: boolean,
+  showInlineWarningsAndErrors: boolean,
+  hideConsoleLogsInStrictMode: boolean,
+  browserTheme: BrowserTheme,
 };

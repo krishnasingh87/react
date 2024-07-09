@@ -1,5 +1,5 @@
 /**
- * Copyright (c) Facebook, Inc. and its affiliates.
+ * Copyright (c) Meta Platforms, Inc. and affiliates.
  *
  * This source code is licensed under the MIT license found in the
  * LICENSE file in the root directory of this source tree.
@@ -7,22 +7,26 @@
  * @jest-environment node
  */
 
-// sanity tests for ReactNoop.act()
+// sanity tests for act()
 
-jest.useRealTimers();
 const React = require('react');
 const ReactNoop = require('react-noop-renderer');
 const Scheduler = require('scheduler');
+const act = require('internal-test-utils').act;
+const {assertLog, waitForAll} = require('internal-test-utils');
 
-describe('ReactNoop.act()', () => {
+// TODO: These tests are no longer specific to the noop renderer
+// implementation. They test the internal implementation we use in the React
+// test suite.
+describe('internal act()', () => {
   it('can use act to flush effects', async () => {
     function App(props) {
       React.useEffect(props.callback);
       return null;
     }
 
-    let calledLog = [];
-    ReactNoop.act(() => {
+    const calledLog = [];
+    await act(() => {
       ReactNoop.render(
         <App
           callback={() => {
@@ -31,17 +35,17 @@ describe('ReactNoop.act()', () => {
         />,
       );
     });
-    expect(Scheduler).toFlushWithoutYielding();
+    await waitForAll([]);
     expect(calledLog).toEqual([0]);
   });
 
   it('should work with async/await', async () => {
     function App() {
-      let [ctr, setCtr] = React.useState(0);
+      const [ctr, setCtr] = React.useState(0);
       async function someAsyncFunction() {
-        Scheduler.unstable_yieldValue('stage 1');
+        Scheduler.log('stage 1');
         await null;
-        Scheduler.unstable_yieldValue('stage 2');
+        Scheduler.log('stage 2');
         await null;
         setCtr(1);
       }
@@ -50,11 +54,11 @@ describe('ReactNoop.act()', () => {
       }, []);
       return ctr;
     }
-    await ReactNoop.act(async () => {
+    await act(() => {
       ReactNoop.render(<App />);
     });
-    expect(Scheduler).toHaveYielded(['stage 1', 'stage 2']);
-    expect(Scheduler).toFlushWithoutYielding();
-    expect(ReactNoop.getChildren()).toEqual([{text: '1', hidden: false}]);
+    assertLog(['stage 1', 'stage 2']);
+    await waitForAll([]);
+    expect(ReactNoop).toMatchRenderedOutput('1');
   });
 });

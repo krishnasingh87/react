@@ -1,5 +1,5 @@
 /**
- * Copyright (c) Facebook, Inc. and its affiliates.
+ * Copyright (c) Meta Platforms, Inc. and affiliates.
  *
  * This source code is licensed under the MIT license found in the
  * LICENSE file in the root directory of this source tree.
@@ -8,38 +8,40 @@
 // This refers to a WWW module.
 const warningWWW = require('warning');
 
+let suppressWarning = false;
+export function setSuppressWarning(newSuppressWarning) {
+  if (__DEV__) {
+    suppressWarning = newSuppressWarning;
+  }
+}
+
 export function warn(format, ...args) {
   if (__DEV__) {
-    printWarning('warn', format, args);
+    if (!suppressWarning) {
+      printWarning('warn', format, args, new Error('react-stack-top-frame'));
+    }
   }
 }
 
 export function error(format, ...args) {
   if (__DEV__) {
-    printWarning('error', format, args);
+    if (!suppressWarning) {
+      printWarning('error', format, args, new Error('react-stack-top-frame'));
+    }
   }
 }
 
-function printWarning(level, format, args) {
+function printWarning(level, format, args, currentStack) {
   if (__DEV__) {
-    const hasExistingStack =
-      args.length > 0 &&
-      typeof args[args.length - 1] === 'string' &&
-      args[args.length - 1].indexOf('\n    in') === 0;
-
-    if (!hasExistingStack) {
-      const React = require('react');
-      const ReactSharedInternals =
-        React.__SECRET_INTERNALS_DO_NOT_USE_OR_YOU_WILL_BE_FIRED;
-      // Defensive in case this is fired before React is initialized.
-      if (ReactSharedInternals != null) {
-        const ReactDebugCurrentFrame =
-          ReactSharedInternals.ReactDebugCurrentFrame;
-        const stack = ReactDebugCurrentFrame.getStackAddendum();
-        if (stack !== '') {
-          format += '%s';
-          args.push(stack);
-        }
+    const React = require('react');
+    const ReactSharedInternals =
+      React.__CLIENT_INTERNALS_DO_NOT_USE_OR_WARN_USERS_THEY_CANNOT_UPGRADE;
+    // Defensive in case this is fired before React is initialized.
+    if (ReactSharedInternals != null && ReactSharedInternals.getCurrentStack) {
+      const stack = ReactSharedInternals.getCurrentStack(currentStack);
+      if (stack !== '') {
+        format += '%s';
+        args.push(stack);
       }
     }
     // TODO: don't ignore level and pass it down somewhere too.

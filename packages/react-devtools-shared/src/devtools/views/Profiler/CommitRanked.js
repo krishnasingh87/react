@@ -1,5 +1,5 @@
 /**
- * Copyright (c) Facebook, Inc. and its affiliates.
+ * Copyright (c) Meta Platforms, Inc. and affiliates.
  *
  * This source code is licensed under the MIT license found in the
  * LICENSE file in the root directory of this source tree.
@@ -7,39 +7,45 @@
  * @flow
  */
 
-import React, {useCallback, useContext, useMemo} from 'react';
+import * as React from 'react';
+import {useCallback, useContext, useMemo, useState} from 'react';
 import AutoSizer from 'react-virtualized-auto-sizer';
 import {FixedSizeList} from 'react-window';
 import {ProfilerContext} from './ProfilerContext';
 import NoCommitData from './NoCommitData';
 import CommitRankedListItem from './CommitRankedListItem';
+import HoveredFiberInfo from './HoveredFiberInfo';
 import {scale} from './utils';
 import {StoreContext} from '../context';
 import {SettingsContext} from '../Settings/SettingsContext';
+import {useHighlightNativeElement} from '../hooks';
+import Tooltip from './Tooltip';
 
 import styles from './CommitRanked.css';
 
+import type {TooltipFiberData} from './HoveredFiberInfo';
 import type {ChartData} from './RankedChartBuilder';
 import type {CommitTree} from './types';
 
-export type ItemData = {|
+export type ItemData = {
   chartData: ChartData,
+  onElementMouseEnter: (fiberData: TooltipFiberData) => void,
+  onElementMouseLeave: () => void,
   scaleX: (value: number, fallbackValue: number) => number,
   selectedFiberID: number | null,
   selectedFiberIndex: number,
   selectFiber: (id: number | null, name: string | null) => void,
   width: number,
-|};
+};
 
-export default function CommitRankedAutoSizer(_: {||}) {
+export default function CommitRankedAutoSizer(_: {}): React.Node {
   const {profilerStore} = useContext(StoreContext);
-  const {rootID, selectedCommitIndex, selectFiber} = useContext(
-    ProfilerContext,
-  );
+  const {rootID, selectedCommitIndex, selectFiber} =
+    useContext(ProfilerContext);
   const {profilingCache} = profilerStore;
 
   const deselectCurrentFiber = useCallback(
-    event => {
+    (event: $FlowFixMe) => {
       event.stopPropagation();
       selectFiber(null, null);
     },
@@ -81,44 +87,82 @@ export default function CommitRankedAutoSizer(_: {||}) {
   }
 }
 
-type Props = {|
+type Props = {
   chartData: ChartData,
   commitTree: CommitTree,
   height: number,
   width: number,
-|};
+};
 
 function CommitRanked({chartData, commitTree, height, width}: Props) {
+  const [hoveredFiberData, setHoveredFiberData] =
+    useState<TooltipFiberData | null>(null);
   const {lineHeight} = useContext(SettingsContext);
   const {selectedFiberID, selectFiber} = useContext(ProfilerContext);
+  const {highlightNativeElement, clearHighlightNativeElement} =
+    useHighlightNativeElement();
 
   const selectedFiberIndex = useMemo(
     () => getNodeIndex(chartData, selectedFiberID),
     [chartData, selectedFiberID],
   );
 
+  const handleElementMouseEnter = useCallback(
+    ({id, name}: $FlowFixMe) => {
+      highlightNativeElement(id); // Highlight last hovered element.
+      setHoveredFiberData({id, name}); // Set hovered fiber data for tooltip
+    },
+    [highlightNativeElement],
+  );
+
+  const handleElementMouseLeave = useCallback(() => {
+    clearHighlightNativeElement(); // clear highlighting of element on mouse leave
+    setHoveredFiberData(null); // clear hovered fiber data for tooltip
+  }, [clearHighlightNativeElement]);
+
   const itemData = useMemo<ItemData>(
     () => ({
       chartData,
+      onElementMouseEnter: handleElementMouseEnter,
+      onElementMouseLeave: handleElementMouseLeave,
       scaleX: scale(0, chartData.nodes[selectedFiberIndex].value, 0, width),
       selectedFiberID,
       selectedFiberIndex,
       selectFiber,
       width,
     }),
-    [chartData, selectedFiberID, selectedFiberIndex, selectFiber, width],
+    [
+      chartData,
+      handleElementMouseEnter,
+      handleElementMouseLeave,
+      selectedFiberID,
+      selectedFiberIndex,
+      selectFiber,
+      width,
+    ],
+  );
+
+  // Tooltip used to show summary of fiber info on hover
+  const tooltipLabel = useMemo(
+    () =>
+      hoveredFiberData !== null ? (
+        <HoveredFiberInfo fiberData={hoveredFiberData} />
+      ) : null,
+    [hoveredFiberData],
   );
 
   return (
-    <FixedSizeList
-      height={height}
-      innerElementType="svg"
-      itemCount={chartData.nodes.length}
-      itemData={itemData}
-      itemSize={lineHeight}
-      width={width}>
-      {CommitRankedListItem}
-    </FixedSizeList>
+    <Tooltip label={tooltipLabel}>
+      <FixedSizeList
+        height={height}
+        innerElementType="svg"
+        itemCount={chartData.nodes.length}
+        itemData={itemData}
+        itemSize={lineHeight}
+        width={width}>
+        {CommitRankedListItem}
+      </FixedSizeList>
+    </Tooltip>
   );
 }
 

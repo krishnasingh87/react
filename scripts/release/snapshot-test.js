@@ -6,7 +6,7 @@ const {exec, spawn} = require('child-process-promise');
 const {join} = require('path');
 const {readFileSync} = require('fs');
 const theme = require('./theme');
-const {logPromise, printDiff} = require('./utils');
+const {getDateStringForCommit, logPromise, printDiff} = require('./utils');
 
 const cwd = join(__dirname, '..', '..');
 
@@ -25,23 +25,28 @@ const run = async () => {
     // https://circleci.com/gh/facebook/react/12707
     let promise = spawn(
       'node',
-      ['./scripts/release/prepare-canary.js', `--build=${CIRCLE_CI_BUILD}`],
+      [
+        './scripts/release/prepare-release-from-ci.js',
+        `--build=${CIRCLE_CI_BUILD}`,
+      ],
       defaultOptions
     );
     logPromise(
       promise,
-      theme`Checking out canary build {version ${CIRCLE_CI_BUILD}}`
+      theme`Checking out "next" build {version ${CIRCLE_CI_BUILD}}`
     );
     await promise;
 
+    const dateString = await getDateStringForCommit(COMMIT);
+
     // Upgrade the above build top a known React version.
     // Note that using the --local flag skips NPM checkout.
-    // This isn't totally necessary but is useful if we want to test an unpublished canary.
+    // This isn't totally necessary but is useful if we want to test an unpublished "next" build.
     promise = spawn(
       'node',
       [
-        './scripts/release/prepare-stable.js',
-        `--version=0.0.0-${COMMIT}`,
+        './scripts/release/prepare-release-from-npm.js',
+        `--version=0.0.0-${COMMIT}-${dateString}`,
         '--local',
       ],
       defaultOptions

@@ -1,5 +1,5 @@
 /**
- * Copyright (c) Facebook, Inc. and its affiliates.
+ * Copyright (c) Meta Platforms, Inc. and affiliates.
  *
  * This source code is licensed under the MIT license found in the
  * LICENSE file in the root directory of this source tree.
@@ -7,7 +7,8 @@
  * @flow
  */
 
-import React, {
+import * as React from 'react';
+import {
   Fragment,
   Suspense,
   useCallback,
@@ -20,32 +21,37 @@ import React, {
 import AutoSizer from 'react-virtualized-auto-sizer';
 import {FixedSizeList} from 'react-window';
 import {TreeDispatcherContext, TreeStateContext} from './TreeContext';
+import Icon from '../Icon';
 import {SettingsContext} from '../Settings/SettingsContext';
-import {BridgeContext, StoreContext} from '../context';
-import ElementView from './Element';
+import {BridgeContext, StoreContext, OptionsContext} from '../context';
+import Element from './Element';
 import InspectHostNodesToggle from './InspectHostNodesToggle';
 import OwnersStack from './OwnersStack';
-import SearchInput from './SearchInput';
+import ComponentSearchInput from './ComponentSearchInput';
 import SettingsModalContextToggle from 'react-devtools-shared/src/devtools/views/Settings/SettingsModalContextToggle';
 import SelectedTreeHighlight from './SelectedTreeHighlight';
 import TreeFocusedContext from './TreeFocusedContext';
-
+import {useHighlightNativeElement, useSubscription} from '../hooks';
+import {clearErrorsAndWarnings as clearErrorsAndWarningsAPI} from 'react-devtools-shared/src/backendAPI';
 import styles from './Tree.css';
+import ButtonIcon from '../ButtonIcon';
+import Button from '../Button';
+import {logEvent} from 'react-devtools-shared/src/Logger';
 
 // Never indent more than this number of pixels (even if we have the room).
 const DEFAULT_INDENTATION_SIZE = 12;
 
-export type ItemData = {|
+export type ItemData = {
   numElements: number,
   isNavigatingWithKeyboard: boolean,
-  lastScrolledIDRef: {current: number | null},
+  lastScrolledIDRef: {current: number | null, ...},
   onElementMouseEnter: (id: number) => void,
   treeFocused: boolean,
-|};
+};
 
-type Props = {||};
+type Props = {};
 
-export default function Tree(props: Props) {
+export default function Tree(props: Props): React.Node {
   const dispatch = useContext(TreeDispatcherContext);
   const {
     numElements,
@@ -57,15 +63,17 @@ export default function Tree(props: Props) {
   } = useContext(TreeStateContext);
   const bridge = useContext(BridgeContext);
   const store = useContext(StoreContext);
-  const [isNavigatingWithKeyboard, setIsNavigatingWithKeyboard] = useState(
-    false,
-  );
+  const {hideSettings} = useContext(OptionsContext);
+  const [isNavigatingWithKeyboard, setIsNavigatingWithKeyboard] =
+    useState(false);
+  const {highlightNativeElement, clearHighlightNativeElement} =
+    useHighlightNativeElement();
   const treeRef = useRef<HTMLDivElement | null>(null);
   const focusTargetRef = useRef<HTMLDivElement | null>(null);
 
   const [treeFocused, setTreeFocused] = useState<boolean>(false);
 
-  const {lineHeight} = useContext(SettingsContext);
+  const {lineHeight, showInlineWarningsAndErrors} = useContext(SettingsContext);
 
   // Make sure a newly selected element is visible in the list.
   // This is helpful for things like the owners list and search.
@@ -79,7 +87,7 @@ export default function Tree(props: Props) {
   // meaning the scroll action would be skipped (since ref updates don't re-run effects).
   // Using a callback ref accounts for this case...
   const listCallbackRef = useCallback(
-    list => {
+    (list: $FlowFixMe) => {
       if (list != null && selectedElementIndex !== null) {
         list.scrollToItem(selectedElementIndex, 'smart');
       }
@@ -89,22 +97,20 @@ export default function Tree(props: Props) {
 
   // Picking an element in the inspector should put focus into the tree.
   // This ensures that keyboard navigation works right after picking a node.
-  useEffect(
-    () => {
-      function handleStopInspectingNative(didSelectNode) {
-        if (didSelectNode && focusTargetRef.current !== null) {
-          focusTargetRef.current.focus();
-        }
+  useEffect(() => {
+    function handleStopInspectingNative(didSelectNode: boolean) {
+      if (didSelectNode && focusTargetRef.current !== null) {
+        focusTargetRef.current.focus();
+        logEvent({
+          event_name: 'select-element',
+          metadata: {source: 'inspector'},
+        });
       }
-      bridge.addListener('stopInspectingNative', handleStopInspectingNative);
-      return () =>
-        bridge.removeListener(
-          'stopInspectingNative',
-          handleStopInspectingNative,
-        );
-    },
-    [bridge],
-  );
+    }
+    bridge.addListener('stopInspectingNative', handleStopInspectingNative);
+    return () =>
+      bridge.removeListener('stopInspectingNative', handleStopInspectingNative);
+  }, [bridge]);
 
   // This ref is passed down the context to elements.
   // It lets them avoid autoscrolling to the same item many times
@@ -112,96 +118,115 @@ export default function Tree(props: Props) {
   const lastScrolledIDRef = useRef<number | null>(null);
 
   // Navigate the tree with up/down arrow keys.
-  useEffect(
-    () => {
-      if (treeRef.current === null) {
-        return () => {};
+  useEffect(() => {
+    if (treeRef.current === null) {
+      return () => {};
+    }
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if ((event: any).target.tagName === 'INPUT' || event.defaultPrevented) {
+        return;
       }
 
-      const handleKeyDown = (event: KeyboardEvent) => {
-        if ((event: any).target.tagName === 'INPUT' || event.defaultPrevented) {
-          return;
-        }
-
-        // TODO We should ignore arrow keys if the focus is outside of DevTools.
-        // Otherwise the inline (embedded) DevTools might change selection unexpectedly,
-        // e.g. when a text input or a select has focus.
-
-        let element;
-        switch (event.key) {
-          case 'ArrowDown':
-            event.preventDefault();
+      let element;
+      switch (event.key) {
+        case 'ArrowDown':
+          event.preventDefault();
+          if (event.altKey) {
+            dispatch({type: 'SELECT_NEXT_SIBLING_IN_TREE'});
+          } else {
             dispatch({type: 'SELECT_NEXT_ELEMENT_IN_TREE'});
-            break;
-          case 'ArrowLeft':
-            event.preventDefault();
-            element =
-              selectedElementID !== null
-                ? store.getElementByID(selectedElementID)
-                : null;
-            if (element !== null) {
+          }
+          break;
+        case 'ArrowLeft':
+          event.preventDefault();
+          element =
+            selectedElementID !== null
+              ? store.getElementByID(selectedElementID)
+              : null;
+          if (element !== null) {
+            if (event.altKey) {
+              if (element.ownerID !== null) {
+                dispatch({type: 'SELECT_OWNER_LIST_PREVIOUS_ELEMENT_IN_TREE'});
+              }
+            } else {
               if (element.children.length > 0 && !element.isCollapsed) {
                 store.toggleIsCollapsed(element.id, true);
               } else {
                 dispatch({type: 'SELECT_PARENT_ELEMENT_IN_TREE'});
               }
             }
-            break;
-          case 'ArrowRight':
-            event.preventDefault();
-            element =
-              selectedElementID !== null
-                ? store.getElementByID(selectedElementID)
-                : null;
-            if (element !== null) {
+          }
+          break;
+        case 'ArrowRight':
+          event.preventDefault();
+          element =
+            selectedElementID !== null
+              ? store.getElementByID(selectedElementID)
+              : null;
+          if (element !== null) {
+            if (event.altKey) {
+              dispatch({type: 'SELECT_OWNER_LIST_NEXT_ELEMENT_IN_TREE'});
+            } else {
               if (element.children.length > 0 && element.isCollapsed) {
                 store.toggleIsCollapsed(element.id, false);
               } else {
                 dispatch({type: 'SELECT_CHILD_ELEMENT_IN_TREE'});
               }
             }
-            break;
-          case 'ArrowUp':
-            event.preventDefault();
+          }
+          break;
+        case 'ArrowUp':
+          event.preventDefault();
+          if (event.altKey) {
+            dispatch({type: 'SELECT_PREVIOUS_SIBLING_IN_TREE'});
+          } else {
             dispatch({type: 'SELECT_PREVIOUS_ELEMENT_IN_TREE'});
-            break;
-          default:
-            return;
-        }
-        setIsNavigatingWithKeyboard(true);
-      };
+          }
+          break;
+        default:
+          return;
+      }
+      setIsNavigatingWithKeyboard(true);
+    };
 
-      // It's important to listen to the ownerDocument to support the browser extension.
-      // Here we use portals to render individual tabs (e.g. Profiler),
-      // and the root document might belong to a different window.
-      const ownerDocument = treeRef.current.ownerDocument;
-      ownerDocument.addEventListener('keydown', handleKeyDown);
+    // We used to listen to at the document level for this event.
+    // That allowed us to listen to up/down arrow key events while another section
+    // of DevTools (like the search input) was focused.
+    // This was a minor UX positive.
+    //
+    // (We had to use ownerDocument rather than document for this, because the
+    // DevTools extension renders the Components and Profiler tabs into portals.)
+    //
+    // This approach caused a problem though: it meant that a react-devtools-inline
+    // instance could steal (and prevent/block) keyboard events from other JavaScript
+    // on the page– which could even include other react-devtools-inline instances.
+    // This is a potential major UX negative.
+    //
+    // Given the above trade offs, we now listen on the root of the Tree itself.
+    const container = treeRef.current;
+    container.addEventListener('keydown', handleKeyDown);
 
-      return () => {
-        ownerDocument.removeEventListener('keydown', handleKeyDown);
-      };
-    },
-    [dispatch, selectedElementID, store],
-  );
+    return () => {
+      container.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [dispatch, selectedElementID, store]);
 
   // Focus management.
   const handleBlur = useCallback(() => setTreeFocused(false), []);
-  const handleFocus = useCallback(
-    () => {
-      setTreeFocused(true);
+  const handleFocus = useCallback(() => {
+    setTreeFocused(true);
 
-      if (selectedElementIndex === null && numElements > 0) {
-        dispatch({
-          type: 'SELECT_ELEMENT_AT_INDEX',
-          payload: 0,
-        });
-      }
-    },
-    [dispatch, numElements, selectedElementIndex],
-  );
+    if (selectedElementIndex === null && numElements > 0) {
+      dispatch({
+        type: 'SELECT_ELEMENT_AT_INDEX',
+        payload: 0,
+      });
+    }
+  }, [dispatch, numElements, selectedElementIndex]);
 
   const handleKeyPress = useCallback(
-    event => {
+    (event: $FlowFixMe) => {
       switch (event.key) {
         case 'Enter':
         case ' ':
@@ -216,59 +241,38 @@ export default function Tree(props: Props) {
     [dispatch, selectedElementID],
   );
 
-  const highlightNativeElement = useCallback(
-    (id: number) => {
-      const element = store.getElementByID(id);
-      const rendererID = store.getRendererIDForElement(id);
-      if (element !== null && rendererID !== null) {
-        bridge.send('highlightNativeElement', {
-          displayName: element.displayName,
-          hideAfterTimeout: false,
-          id,
-          openNativeElementsPanel: false,
-          rendererID,
-          scrollIntoView: false,
-        });
-      }
-    },
-    [store, bridge],
-  );
-
   // If we switch the selected element while using the keyboard,
   // start highlighting it in the DOM instead of the last hovered node.
   const searchRef = useRef({searchIndex, searchResults});
-  useEffect(
-    () => {
-      let didSelectNewSearchResult = false;
-      if (
-        searchRef.current.searchIndex !== searchIndex ||
-        searchRef.current.searchResults !== searchResults
-      ) {
-        searchRef.current.searchIndex = searchIndex;
-        searchRef.current.searchResults = searchResults;
-        didSelectNewSearchResult = true;
+  useEffect(() => {
+    let didSelectNewSearchResult = false;
+    if (
+      searchRef.current.searchIndex !== searchIndex ||
+      searchRef.current.searchResults !== searchResults
+    ) {
+      searchRef.current.searchIndex = searchIndex;
+      searchRef.current.searchResults = searchResults;
+      didSelectNewSearchResult = true;
+    }
+    if (isNavigatingWithKeyboard || didSelectNewSearchResult) {
+      if (selectedElementID !== null) {
+        highlightNativeElement(selectedElementID);
+      } else {
+        clearHighlightNativeElement();
       }
-      if (isNavigatingWithKeyboard || didSelectNewSearchResult) {
-        if (selectedElementID !== null) {
-          highlightNativeElement(selectedElementID);
-        } else {
-          bridge.send('clearNativeElementHighlight');
-        }
-      }
-    },
-    [
-      bridge,
-      isNavigatingWithKeyboard,
-      highlightNativeElement,
-      searchIndex,
-      searchResults,
-      selectedElementID,
-    ],
-  );
+    }
+  }, [
+    bridge,
+    isNavigatingWithKeyboard,
+    highlightNativeElement,
+    searchIndex,
+    searchResults,
+    selectedElementID,
+  ]);
 
   // Highlight last hovered element.
   const handleElementMouseEnter = useCallback(
-    id => {
+    (id: $FlowFixMe) => {
       // Ignore hover while we're navigating with keyboard.
       // This avoids flicker from the hovered nodes under the mouse.
       if (!isNavigatingWithKeyboard) {
@@ -284,12 +288,7 @@ export default function Tree(props: Props) {
     setIsNavigatingWithKeyboard(false);
   }, []);
 
-  const handleMouseLeave = useCallback(
-    () => {
-      bridge.send('clearNativeElementHighlight');
-    },
-    [bridge],
-  );
+  const handleMouseLeave = clearHighlightNativeElement;
 
   // Let react-window know to re-render any time the underlying tree data changes.
   // This includes the owner context, since it controls a filtered view of the tree.
@@ -315,49 +314,133 @@ export default function Tree(props: Props) {
     [store],
   );
 
+  const handlePreviousErrorOrWarningClick = React.useCallback(() => {
+    dispatch({type: 'SELECT_PREVIOUS_ELEMENT_WITH_ERROR_OR_WARNING_IN_TREE'});
+  }, []);
+
+  const handleNextErrorOrWarningClick = React.useCallback(() => {
+    dispatch({type: 'SELECT_NEXT_ELEMENT_WITH_ERROR_OR_WARNING_IN_TREE'});
+  }, []);
+
+  const errorsOrWarningsSubscription = useMemo(
+    () => ({
+      getCurrentValue: () => ({
+        errors: store.errorCount,
+        warnings: store.warningCount,
+      }),
+      subscribe: (callback: Function) => {
+        store.addListener('mutated', callback);
+        return () => store.removeListener('mutated', callback);
+      },
+    }),
+    [store],
+  );
+  const {errors, warnings} = useSubscription(errorsOrWarningsSubscription);
+
+  const clearErrorsAndWarnings = () => {
+    clearErrorsAndWarningsAPI({bridge, store});
+  };
+
+  const zeroElementsNotice = (
+    <div className={styles.ZeroElementsNotice}>
+      <p>Loading React Element Tree...</p>
+      <p>
+        If this seems stuck, please follow the{' '}
+        <a
+          className={styles.Link}
+          href="https://github.com/facebook/react/blob/main/packages/react-devtools/README.md#the-react-tab-shows-no-components"
+          target="_blank">
+          troubleshooting instructions
+        </a>
+        .
+      </p>
+    </div>
+  );
+
   return (
     <TreeFocusedContext.Provider value={treeFocused}>
       <div className={styles.Tree} ref={treeRef}>
         <div className={styles.SearchInput}>
-          {store.supportsNativeInspection && (
+          {store.supportsClickToInspect && (
             <Fragment>
               <InspectHostNodesToggle />
               <div className={styles.VRule} />
             </Fragment>
           )}
           <Suspense fallback={<Loading />}>
-            {ownerID !== null ? <OwnersStack /> : <SearchInput />}
+            {ownerID !== null ? <OwnersStack /> : <ComponentSearchInput />}
           </Suspense>
-          <div className={styles.VRule} />
-          <SettingsModalContextToggle />
-        </div>
-        <div
-          className={styles.AutoSizerWrapper}
-          onBlur={handleBlur}
-          onFocus={handleFocus}
-          onKeyPress={handleKeyPress}
-          onMouseMove={handleMouseMove}
-          onMouseLeave={handleMouseLeave}
-          ref={focusTargetRef}
-          tabIndex={0}>
-          <AutoSizer>
-            {({height, width}) => (
-              // $FlowFixMe https://github.com/facebook/flow/issues/7341
-              <FixedSizeList
-                className={styles.List}
-                height={height}
-                innerElementType={InnerElementType}
-                itemCount={numElements}
-                itemData={itemData}
-                itemKey={itemKey}
-                itemSize={lineHeight}
-                ref={listCallbackRef}
-                width={width}>
-                {ElementView}
-              </FixedSizeList>
+          {showInlineWarningsAndErrors &&
+            ownerID === null &&
+            (errors > 0 || warnings > 0) && (
+              <React.Fragment>
+                <div className={styles.VRule} />
+                {errors > 0 && (
+                  <div className={styles.IconAndCount}>
+                    <Icon className={styles.ErrorIcon} type="error" />
+                    {errors}
+                  </div>
+                )}
+                {warnings > 0 && (
+                  <div className={styles.IconAndCount}>
+                    <Icon className={styles.WarningIcon} type="warning" />
+                    {warnings}
+                  </div>
+                )}
+                <Button
+                  onClick={handlePreviousErrorOrWarningClick}
+                  title="Scroll to previous error or warning">
+                  <ButtonIcon type="up" />
+                </Button>
+                <Button
+                  onClick={handleNextErrorOrWarningClick}
+                  title="Scroll to next error or warning">
+                  <ButtonIcon type="down" />
+                </Button>
+                <Button
+                  onClick={clearErrorsAndWarnings}
+                  title="Clear all errors and warnings">
+                  <ButtonIcon type="clear" />
+                </Button>
+              </React.Fragment>
             )}
-          </AutoSizer>
+          {!hideSettings && (
+            <Fragment>
+              <div className={styles.VRule} />
+              <SettingsModalContextToggle />
+            </Fragment>
+          )}
         </div>
+        {numElements === 0 ? (
+          zeroElementsNotice
+        ) : (
+          <div
+            className={styles.AutoSizerWrapper}
+            onBlur={handleBlur}
+            onFocus={handleFocus}
+            onKeyPress={handleKeyPress}
+            onMouseMove={handleMouseMove}
+            onMouseLeave={handleMouseLeave}
+            ref={focusTargetRef}
+            tabIndex={0}>
+            <AutoSizer>
+              {({height, width}) => (
+                <FixedSizeList
+                  className={styles.List}
+                  height={height}
+                  innerElementType={InnerElementType}
+                  itemCount={numElements}
+                  itemData={itemData}
+                  itemKey={itemKey}
+                  itemSize={lineHeight}
+                  ref={listCallbackRef}
+                  width={width}>
+                  {Element}
+                </FixedSizeList>
+              )}
+            </AutoSizer>
+          </div>
+        )}
       </div>
     </TreeFocusedContext.Provider>
   );
@@ -406,8 +489,8 @@ export default function Tree(props: Props) {
 function updateIndentationSizeVar(
   innerDiv: HTMLDivElement,
   cachedChildWidths: WeakMap<HTMLElement, number>,
-  indentationSizeRef: {|current: number|},
-  prevListWidthRef: {|current: number|},
+  indentationSizeRef: {current: number},
+  prevListWidthRef: {current: number},
 ): void {
   const list = ((innerDiv.parentElement: any): HTMLDivElement);
   const listWidth = list.clientWidth;
@@ -426,7 +509,7 @@ function updateIndentationSizeVar(
   let maxIndentationSize: number = indentationSizeRef.current;
 
   // eslint-disable-next-line no-for-of-loops/no-for-of-loops
-  for (let child of innerDiv.children) {
+  for (const child of innerDiv.children) {
     const depth = parseInt(child.getAttribute('data-depth'), 10) || 0;
 
     let childWidth: number = 0;
@@ -454,7 +537,8 @@ function updateIndentationSizeVar(
   list.style.setProperty('--indentation-size', `${maxIndentationSize}px`);
 }
 
-function InnerElementType({children, style, ...rest}) {
+// $FlowFixMe[missing-local-annot]
+function InnerElementType({children, style}) {
   const {ownerID} = useContext(TreeStateContext);
 
   const cachedChildWidths = useMemo<WeakMap<HTMLElement, number>>(
@@ -464,7 +548,7 @@ function InnerElementType({children, style, ...rest}) {
 
   // This ref tracks the current indentation size.
   // We decrease indentation to fit wider/deeper trees.
-  // We indentionally do not increase it again afterward, to avoid the perception of content "jumping"
+  // We intentionally do not increase it again afterward, to avoid the perception of content "jumping"
   // e.g. clicking to toggle/collapse a row might otherwise jump horizontally beneath your cursor,
   // e.g. scrolling a wide row off screen could cause narrower rows to jump to the right some.
   //
@@ -502,11 +586,7 @@ function InnerElementType({children, style, ...rest}) {
   // A lot of options were considered; this seemed the one that requires the least code.
   // See https://github.com/bvaughn/react-devtools-experimental/issues/9
   return (
-    <div
-      className={styles.InnerElementType}
-      ref={divRef}
-      style={style}
-      {...rest}>
+    <div className={styles.InnerElementType} ref={divRef} style={style}>
       <SelectedTreeHighlight />
       {children}
     </div>

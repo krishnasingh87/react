@@ -1,5 +1,5 @@
 /**
- * Copyright (c) Facebook, Inc. and its affiliates.
+ * Copyright (c) Meta Platforms, Inc. and affiliates.
  *
  * This source code is licensed under the MIT license found in the
  * LICENSE file in the root directory of this source tree.
@@ -7,19 +7,24 @@
  * @flow
  */
 
-import {PLUGIN_EVENT_SYSTEM} from 'legacy-events/EventSystemFlags';
+import type {
+  AnyNativeEvent,
+  LegacyPluginModule,
+} from './legacy-events/PluginModuleType';
+import type {Fiber} from 'react-reconciler/src/ReactInternalTypes';
+import type {ReactSyntheticEvent} from './legacy-events/ReactSyntheticEventType';
+import type {TopLevelType} from './legacy-events/TopLevelEventTypes';
+
 import {
-  getListener,
-  runExtractedPluginEventsInBatch,
-} from 'legacy-events/EventPluginHub';
-import {registrationNameModules} from 'legacy-events/EventPluginRegistry';
-import {batchedUpdates} from 'legacy-events/ReactGenericBatching';
-import {enableNativeTargetAsInstance} from 'shared/ReactFeatureFlags';
+  registrationNameModules,
+  plugins,
+} from './legacy-events/EventPluginRegistry';
+import {batchedUpdates} from './legacy-events/ReactGenericBatching';
+import {runEventsInBatch} from './legacy-events/EventBatching';
+import getListener from './ReactNativeGetListener';
+import accumulateInto from './legacy-events/accumulateInto';
 
 import {getInstanceFromNode} from './ReactNativeComponentTree';
-
-import type {AnyNativeEvent} from 'legacy-events/PluginModuleType';
-import type {TopLevelType} from 'legacy-events/TopLevelEventTypes';
 
 export {getListener, registrationNameModules as registrationNames};
 
@@ -38,13 +43,14 @@ const EMPTY_NATIVE_EVENT = (({}: any): AnyNativeEvent);
  * @param {Array<number>} indices Indices by which to pull subsequence.
  * @return {Array<Touch>} Subsequence of touch objects.
  */
-const touchSubsequence = function(touches, indices) {
+// $FlowFixMe[missing-local-annot]
+function touchSubsequence(touches, indices) {
   const ret = [];
   for (let i = 0; i < indices.length; i++) {
     ret.push(touches[indices[i]]);
   }
   return ret;
-};
+}
 
 /**
  * TODO: Pool all of this.
@@ -57,7 +63,7 @@ const touchSubsequence = function(touches, indices) {
  * @param {Array<number>} indices Indices to remove from `touches`.
  * @return {Array<Touch>} Subsequence of removed touch objects.
  */
-const removeTouchesAtIndices = function(
+function removeTouchesAtIndices(
   touches: Array<Object>,
   indices: Array<number>,
 ): Array<Object> {
@@ -79,7 +85,7 @@ const removeTouchesAtIndices = function(
   }
   temp.length = fillAt;
   return rippedOut;
-};
+}
 
 /**
  * Internal version of `receiveEvent` in terms of normalized (non-tag)
@@ -100,25 +106,63 @@ function _receiveRootNodeIDEvent(
   const inst = getInstanceFromNode(rootNodeID);
 
   let target = null;
-  if (enableNativeTargetAsInstance) {
-    if (inst != null) {
-      target = inst.stateNode;
-    }
-  } else {
-    target = nativeEvent.target;
+  if (inst != null) {
+    target = inst.stateNode;
   }
 
-  batchedUpdates(function() {
-    runExtractedPluginEventsInBatch(
-      topLevelType,
-      inst,
-      nativeEvent,
-      target,
-      PLUGIN_EVENT_SYSTEM,
-    );
+  batchedUpdates(function () {
+    runExtractedPluginEventsInBatch(topLevelType, inst, nativeEvent, target);
   });
   // React Native doesn't use ReactControlledComponent but if it did, here's
   // where it would do it.
+}
+
+/**
+ * Allows registered plugins an opportunity to extract events from top-level
+ * native browser events.
+ *
+ * @return {*} An accumulation of synthetic events.
+ * @internal
+ */
+function extractPluginEvents(
+  topLevelType: TopLevelType,
+  targetInst: null | Fiber,
+  nativeEvent: AnyNativeEvent,
+  nativeEventTarget: null | EventTarget,
+): Array<ReactSyntheticEvent> | ReactSyntheticEvent | null {
+  let events: Array<ReactSyntheticEvent> | ReactSyntheticEvent | null = null;
+  const legacyPlugins = ((plugins: any): Array<LegacyPluginModule<Event>>);
+  for (let i = 0; i < legacyPlugins.length; i++) {
+    // Not every plugin in the ordering may be loaded at runtime.
+    const possiblePlugin: LegacyPluginModule<AnyNativeEvent> = legacyPlugins[i];
+    if (possiblePlugin) {
+      const extractedEvents = possiblePlugin.extractEvents(
+        topLevelType,
+        targetInst,
+        nativeEvent,
+        nativeEventTarget,
+      );
+      if (extractedEvents) {
+        events = accumulateInto(events, extractedEvents);
+      }
+    }
+  }
+  return events;
+}
+
+function runExtractedPluginEventsInBatch(
+  topLevelType: TopLevelType,
+  targetInst: null | Fiber,
+  nativeEvent: AnyNativeEvent,
+  nativeEventTarget: null | EventTarget,
+) {
+  const events = extractPluginEvents(
+    topLevelType,
+    targetInst,
+    nativeEvent,
+    nativeEventTarget,
+  );
+  runEventsInBatch(events);
 }
 
 /**
@@ -191,7 +235,7 @@ export function receiveTouches(
         rootNodeID = target;
       }
     }
-    // $FlowFixMe Shouldn't we *not* call it if rootNodeID is null?
+    // $FlowFixMe[incompatible-call] Shouldn't we *not* call it if rootNodeID is null?
     _receiveRootNodeIDEvent(rootNodeID, eventTopLevelType, nativeEvent);
   }
 }

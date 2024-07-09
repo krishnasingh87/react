@@ -1,5 +1,5 @@
 /**
- * Copyright (c) Facebook, Inc. and its affiliates.
+ * Copyright (c) Meta Platforms, Inc. and affiliates.
  *
  * This source code is licensed under the MIT license found in the
  * LICENSE file in the root directory of this source tree.
@@ -7,63 +7,53 @@
  * @flow
  */
 
-// The Symbol used to tag the ReactElement-like types. If there is no native Symbol
-// nor polyfill, then a plain number is used for performance.
-const hasSymbol = typeof Symbol === 'function' && Symbol.for;
+import {renameElementSymbol} from 'shared/ReactFeatureFlags';
 
-export const REACT_ELEMENT_TYPE = hasSymbol
-  ? Symbol.for('react.element')
-  : 0xeac7;
-export const REACT_PORTAL_TYPE = hasSymbol
-  ? Symbol.for('react.portal')
-  : 0xeaca;
-export const REACT_FRAGMENT_TYPE = hasSymbol
-  ? Symbol.for('react.fragment')
-  : 0xeacb;
-export const REACT_STRICT_MODE_TYPE = hasSymbol
-  ? Symbol.for('react.strict_mode')
-  : 0xeacc;
-export const REACT_PROFILER_TYPE = hasSymbol
-  ? Symbol.for('react.profiler')
-  : 0xead2;
-export const REACT_PROVIDER_TYPE = hasSymbol
-  ? Symbol.for('react.provider')
-  : 0xeacd;
-export const REACT_CONTEXT_TYPE = hasSymbol
-  ? Symbol.for('react.context')
-  : 0xeace;
-// TODO: We don't use AsyncMode or ConcurrentMode anymore. They were temporary
-// (unstable) APIs that have been removed. Can we remove the symbols?
-export const REACT_ASYNC_MODE_TYPE = hasSymbol
-  ? Symbol.for('react.async_mode')
-  : 0xeacf;
-export const REACT_CONCURRENT_MODE_TYPE = hasSymbol
-  ? Symbol.for('react.concurrent_mode')
-  : 0xeacf;
-export const REACT_FORWARD_REF_TYPE = hasSymbol
-  ? Symbol.for('react.forward_ref')
-  : 0xead0;
-export const REACT_SUSPENSE_TYPE = hasSymbol
-  ? Symbol.for('react.suspense')
-  : 0xead1;
-export const REACT_SUSPENSE_LIST_TYPE = hasSymbol
-  ? Symbol.for('react.suspense_list')
-  : 0xead8;
-export const REACT_MEMO_TYPE = hasSymbol ? Symbol.for('react.memo') : 0xead3;
-export const REACT_LAZY_TYPE = hasSymbol ? Symbol.for('react.lazy') : 0xead4;
-export const REACT_CHUNK_TYPE = hasSymbol ? Symbol.for('react.chunk') : 0xead9;
-export const REACT_FUNDAMENTAL_TYPE = hasSymbol
-  ? Symbol.for('react.fundamental')
-  : 0xead5;
-export const REACT_RESPONDER_TYPE = hasSymbol
-  ? Symbol.for('react.responder')
-  : 0xead6;
-export const REACT_SCOPE_TYPE = hasSymbol ? Symbol.for('react.scope') : 0xead7;
+// ATTENTION
+// When adding new symbols to this file,
+// Please consider also adding to 'react-devtools-shared/src/backend/ReactSymbols'
 
-const MAYBE_ITERATOR_SYMBOL = typeof Symbol === 'function' && Symbol.iterator;
+// The Symbol used to tag the ReactElement-like types.
+export const REACT_LEGACY_ELEMENT_TYPE: symbol = Symbol.for('react.element');
+export const REACT_ELEMENT_TYPE: symbol = renameElementSymbol
+  ? Symbol.for('react.transitional.element')
+  : REACT_LEGACY_ELEMENT_TYPE;
+export const REACT_PORTAL_TYPE: symbol = Symbol.for('react.portal');
+export const REACT_FRAGMENT_TYPE: symbol = Symbol.for('react.fragment');
+export const REACT_STRICT_MODE_TYPE: symbol = Symbol.for('react.strict_mode');
+export const REACT_PROFILER_TYPE: symbol = Symbol.for('react.profiler');
+export const REACT_PROVIDER_TYPE: symbol = Symbol.for('react.provider'); // TODO: Delete with enableRenderableContext
+export const REACT_CONSUMER_TYPE: symbol = Symbol.for('react.consumer');
+export const REACT_CONTEXT_TYPE: symbol = Symbol.for('react.context');
+export const REACT_FORWARD_REF_TYPE: symbol = Symbol.for('react.forward_ref');
+export const REACT_SUSPENSE_TYPE: symbol = Symbol.for('react.suspense');
+export const REACT_SUSPENSE_LIST_TYPE: symbol = Symbol.for(
+  'react.suspense_list',
+);
+export const REACT_MEMO_TYPE: symbol = Symbol.for('react.memo');
+export const REACT_LAZY_TYPE: symbol = Symbol.for('react.lazy');
+export const REACT_SCOPE_TYPE: symbol = Symbol.for('react.scope');
+export const REACT_DEBUG_TRACING_MODE_TYPE: symbol = Symbol.for(
+  'react.debug_trace_mode',
+);
+export const REACT_OFFSCREEN_TYPE: symbol = Symbol.for('react.offscreen');
+export const REACT_LEGACY_HIDDEN_TYPE: symbol = Symbol.for(
+  'react.legacy_hidden',
+);
+export const REACT_TRACING_MARKER_TYPE: symbol = Symbol.for(
+  'react.tracing_marker',
+);
+
+export const REACT_MEMO_CACHE_SENTINEL: symbol = Symbol.for(
+  'react.memo_cache_sentinel',
+);
+
+export const REACT_POSTPONE_TYPE: symbol = Symbol.for('react.postpone');
+
+const MAYBE_ITERATOR_SYMBOL = Symbol.iterator;
 const FAUX_ITERATOR_SYMBOL = '@@iterator';
 
-export function getIteratorFn(maybeIterable: ?any): ?() => ?Iterator<*> {
+export function getIteratorFn(maybeIterable: ?any): ?() => ?Iterator<any> {
   if (maybeIterable === null || typeof maybeIterable !== 'object') {
     return null;
   }
@@ -75,3 +65,5 @@ export function getIteratorFn(maybeIterable: ?any): ?() => ?Iterator<*> {
   }
   return null;
 }
+
+export const ASYNC_ITERATOR = Symbol.asyncIterator;

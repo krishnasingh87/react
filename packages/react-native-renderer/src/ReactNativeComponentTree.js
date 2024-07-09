@@ -1,13 +1,9 @@
 /**
- * Copyright (c) Facebook, Inc. and its affiliates.
+ * Copyright (c) Meta Platforms, Inc. and affiliates.
  *
  * This source code is licensed under the MIT license found in the
  * LICENSE file in the root directory of this source tree.
  */
-
-import invariant from 'shared/invariant';
-
-import {enableNativeTargetAsInstance} from 'shared/ReactFeatureFlags';
 
 const instanceCache = new Map();
 const instanceProps = new Map();
@@ -26,23 +22,19 @@ function getInstanceFromTag(tag) {
 }
 
 function getTagFromInstance(inst) {
-  if (enableNativeTargetAsInstance) {
-    let nativeInstance = inst.stateNode;
-    let tag = nativeInstance._nativeTag;
-    if (tag === undefined) {
-      nativeInstance = nativeInstance.canonical;
-      tag = nativeInstance._nativeTag;
-    }
-    invariant(tag, 'All native instances should have a tag.');
-    return nativeInstance;
-  } else {
-    let tag = inst.stateNode._nativeTag;
-    if (tag === undefined) {
-      tag = inst.stateNode.canonical._nativeTag;
-    }
-    invariant(tag, 'All native instances should have a tag.');
-    return tag;
+  let nativeInstance = inst.stateNode;
+  let tag = nativeInstance._nativeTag;
+  if (tag === undefined && nativeInstance.canonical != null) {
+    // For compatibility with Fabric
+    tag = nativeInstance.canonical.nativeTag;
+    nativeInstance = nativeInstance.canonical.publicInstance;
   }
+
+  if (!tag) {
+    throw new Error('All native instances should have a tag.');
+  }
+
+  return nativeInstance;
 }
 
 export {

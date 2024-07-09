@@ -5,8 +5,9 @@ if (NODE_ENV !== 'development' && NODE_ENV !== 'production') {
   throw new Error('NODE_ENV must either be set to development or production.');
 }
 global.__DEV__ = NODE_ENV === 'development';
+global.__EXTENSION__ = false;
+global.__TEST__ = NODE_ENV === 'test';
 global.__PROFILE__ = NODE_ENV === 'development';
-global.__UMD__ = false;
 
 const RELEASE_CHANNEL = process.env.RELEASE_CHANNEL;
 
@@ -17,18 +18,10 @@ global.__EXPERIMENTAL__ =
     ? RELEASE_CHANNEL === 'experimental'
     : true;
 
-if (typeof window !== 'undefined') {
-  global.requestIdleCallback = function(callback) {
-    return setTimeout(() => {
-      callback({
-        timeRemaining() {
-          return Infinity;
-        },
-      });
-    });
-  };
+global.__VARIANT__ = !!process.env.VARIANT;
 
-  global.cancelIdleCallback = function(callbackID) {
-    clearTimeout(callbackID);
-  };
+if (typeof window !== 'undefined') {
+} else {
+  global.AbortController =
+    require('abortcontroller-polyfill/dist/cjs-ponyfill').AbortController;
 }

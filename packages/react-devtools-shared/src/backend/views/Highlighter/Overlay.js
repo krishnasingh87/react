@@ -1,5 +1,5 @@
 /**
- * Copyright (c) Facebook, Inc. and its affiliates.
+ * Copyright (c) Meta Platforms, Inc. and affiliates.
  *
  * This source code is licensed under the MIT license found in the
  * LICENSE file in the root directory of this source tree.
@@ -7,12 +7,14 @@
  * @flow
  */
 
-import assign from 'object-assign';
 import {getElementDimensions, getNestedBoundingClientRect} from '../utils';
 
 import type {Rect} from '../utils';
+import type Agent from 'react-devtools-shared/src/backend/agent';
 
-type Box = {|top: number, left: number, width: number, height: number|};
+type Box = {top: number, left: number, width: number, height: number};
+
+const assign = Object.assign;
 
 // Note that the Overlay components are not affected by the active Theme,
 // because they highlight elements in the main Chrome window (outside of devtools).
@@ -146,19 +148,20 @@ class OverlayTip {
 }
 
 export default class Overlay {
-  window: window;
-  tipBoundsWindow: window;
+  window: any;
+  tipBoundsWindow: any;
   container: HTMLElement;
   tip: OverlayTip;
   rects: Array<OverlayRect>;
+  agent: Agent;
 
-  constructor() {
+  constructor(agent: Agent) {
     // Find the root window, because overlays are positioned relative to it.
-    let currentWindow = window.__REACT_DEVTOOLS_TARGET_WINDOW__ || window;
+    const currentWindow = window.__REACT_DEVTOOLS_TARGET_WINDOW__ || window;
     this.window = currentWindow;
 
     // When opened in shells/dev, the tooltip should be bound by the app iframe, not by the topmost window.
-    let tipBoundsWindow = window.__REACT_DEVTOOLS_TARGET_WINDOW__ || window;
+    const tipBoundsWindow = window.__REACT_DEVTOOLS_TARGET_WINDOW__ || window;
     this.tipBoundsWindow = tipBoundsWindow;
 
     const doc = currentWindow.document;
@@ -167,6 +170,8 @@ export default class Overlay {
 
     this.tip = new OverlayTip(doc, this.container);
     this.rects = [];
+
+    this.agent = agent;
 
     doc.body.appendChild(this.container);
   }
@@ -226,9 +231,21 @@ export default class Overlay {
 
     if (!name) {
       name = elements[0].nodeName.toLowerCase();
-      const ownerName = getOwnerDisplayName(elements[0]);
-      if (ownerName) {
-        name += ' (in ' + ownerName + ')';
+
+      const node = elements[0];
+      const rendererInterface =
+        this.agent.getBestMatchingRendererInterface(node);
+      if (rendererInterface) {
+        const id = rendererInterface.getFiberIDForNative(node, true);
+        if (id) {
+          const ownerName = rendererInterface.getDisplayNameForFiberID(
+            id,
+            true,
+          );
+          if (ownerName) {
+            name += ' (in ' + ownerName + ')';
+          }
+        }
       }
     }
 
@@ -259,43 +276,16 @@ export default class Overlay {
   }
 }
 
-function getOwnerDisplayName(node) {
-  const fiber = getFiber(node);
-  if (fiber === null) {
-    return null;
-  }
-  const owner = fiber._debugOwner;
-  if (owner && owner.type) {
-    const ownerName = owner.type.displayName || owner.type.name;
-    return ownerName || null;
-  }
-  return null;
-}
-
-let lastFoundInternalKey = null;
-function getFiber(node) {
-  if (
-    lastFoundInternalKey !== null &&
-    node.hasOwnProperty(lastFoundInternalKey)
-  ) {
-    return (node: any)[lastFoundInternalKey];
-  }
-  let internalKey = Object.keys(node).find(
-    key => key.indexOf('__reactInternalInstance') === 0,
-  );
-  if (internalKey) {
-    lastFoundInternalKey = internalKey;
-    return (node: any)[lastFoundInternalKey];
-  }
-  return null;
-}
-
-function findTipPos(dims, bounds, tipSize) {
+function findTipPos(
+  dims: Box,
+  bounds: Box,
+  tipSize: {height: number, width: number},
+) {
   const tipHeight = Math.max(tipSize.height, 20);
   const tipWidth = Math.max(tipSize.width, 60);
   const margin = 5;
 
-  let top;
+  let top: number | string;
   if (dims.top + dims.height + tipHeight <= bounds.top + bounds.height) {
     if (dims.top + dims.height < bounds.top + 0) {
       top = bounds.top + margin;
@@ -312,7 +302,7 @@ function findTipPos(dims, bounds, tipSize) {
     top = bounds.top + bounds.height - tipHeight - margin;
   }
 
-  let left = dims.left + margin;
+  let left: number | string = dims.left + margin;
   if (dims.left < bounds.left) {
     left = bounds.left + margin;
   }
@@ -327,7 +317,7 @@ function findTipPos(dims, bounds, tipSize) {
   };
 }
 
-function boxWrap(dims, what, node) {
+function boxWrap(dims: any, what: string, node: HTMLElement) {
   assign(node.style, {
     borderTopWidth: dims[what + 'Top'] + 'px',
     borderLeftWidth: dims[what + 'Left'] + 'px',

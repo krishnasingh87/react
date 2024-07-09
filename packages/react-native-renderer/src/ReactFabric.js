@@ -1,5 +1,5 @@
 /**
- * Copyright (c) Facebook, Inc. and its affiliates.
+ * Copyright (c) Meta Platforms, Inc. and affiliates.
  *
  * This source code is licensed under the MIT license found in the
  * LICENSE file in the root directory of this source tree.
@@ -7,227 +7,220 @@
  * @flow
  */
 
-import type {ReactFabricType, HostComponent} from './ReactNativeTypes';
-import type {ReactNodeList} from 'shared/ReactTypes';
+import type {ReactPortal, ReactNodeList} from 'shared/ReactTypes';
+import type {ElementRef, Element, ElementType} from 'react';
+import type {FiberRoot} from 'react-reconciler/src/ReactInternalTypes';
+import type {RenderRootOptions} from './ReactNativeTypes';
 
 import './ReactFabricInjection';
 
 import {
-  findHostInstance,
-  findHostInstanceWithWarning,
-  batchedEventUpdates,
   batchedUpdates as batchedUpdatesImpl,
   discreteUpdates,
-  flushDiscreteUpdates,
   createContainer,
   updateContainer,
   injectIntoDevTools,
   getPublicRootInstance,
-} from 'react-reconciler/inline.fabric';
+  defaultOnUncaughtError,
+  defaultOnCaughtError,
+  defaultOnRecoverableError,
+} from 'react-reconciler/src/ReactFiberReconciler';
 
-import {createPortal} from 'shared/ReactPortal';
-import {setBatchingImplementation} from 'legacy-events/ReactGenericBatching';
+import {createPortal as createPortalImpl} from 'react-reconciler/src/ReactPortal';
+import {setBatchingImplementation} from './legacy-events/ReactGenericBatching';
 import ReactVersion from 'shared/ReactVersion';
 
-import NativeMethodsMixin from './NativeMethodsMixin';
-import ReactNativeComponent from './ReactNativeComponent';
 import {getClosestInstanceFromNode} from './ReactFabricComponentTree';
-import {getInspectorDataForViewTag} from './ReactNativeFiberInspector';
+import {
+  getInspectorDataForViewTag,
+  getInspectorDataForViewAtPoint,
+  getInspectorDataForInstance,
+} from './ReactNativeFiberInspector';
+import {LegacyRoot, ConcurrentRoot} from 'react-reconciler/src/ReactRootTags';
+import {
+  findHostInstance_DEPRECATED,
+  findNodeHandle,
+  dispatchCommand,
+  sendAccessibilityEvent,
+  getNodeFromInternalInstanceHandle,
+  isChildPublicInstance,
+} from './ReactNativePublicCompat';
+import {getPublicInstanceFromInternalInstanceHandle} from './ReactFiberConfigFabric';
 
-import {LegacyRoot} from 'shared/ReactRootTags';
-import ReactSharedInternals from 'shared/ReactSharedInternals';
-import getComponentName from 'shared/getComponentName';
+// Module provided by RN:
+import {ReactFiberErrorDialog} from 'react-native/Libraries/ReactPrivate/ReactNativePrivateInterface';
+import {disableLegacyMode} from 'shared/ReactFeatureFlags';
 
-const {dispatchCommand: fabricDispatchCommand} = nativeFabricUIManager;
-
-const ReactCurrentOwner = ReactSharedInternals.ReactCurrentOwner;
-
-function findHostInstance_DEPRECATED(
-  componentOrHandle: any,
-): ?React$ElementRef<HostComponent<mixed>> {
-  if (__DEV__) {
-    const owner = ReactCurrentOwner.current;
-    if (owner !== null && owner.stateNode !== null) {
-      if (!owner.stateNode._warnedAboutRefsInRender) {
-        console.error(
-          '%s is accessing findNodeHandle inside its render(). ' +
-            'render() should be a pure function of props and state. It should ' +
-            'never access something that requires stale data from the previous ' +
-            'render, such as refs. Move this logic to componentDidMount and ' +
-            'componentDidUpdate instead.',
-          getComponentName(owner.type) || 'A component',
-        );
-      }
-
-      owner.stateNode._warnedAboutRefsInRender = true;
-    }
-  }
-  if (componentOrHandle == null) {
-    return null;
-  }
-  if (componentOrHandle._nativeTag) {
-    return componentOrHandle;
-  }
-  if (componentOrHandle.canonical && componentOrHandle.canonical._nativeTag) {
-    return componentOrHandle.canonical;
-  }
-  let hostInstance;
-  if (__DEV__) {
-    hostInstance = findHostInstanceWithWarning(
-      componentOrHandle,
-      'findHostInstance_DEPRECATED',
-    );
-  } else {
-    hostInstance = findHostInstance(componentOrHandle);
-  }
-
-  if (hostInstance == null) {
-    return hostInstance;
-  }
-  if ((hostInstance: any).canonical) {
-    // Fabric
-    return (hostInstance: any).canonical;
-  }
-  return hostInstance;
+if (typeof ReactFiberErrorDialog.showErrorDialog !== 'function') {
+  throw new Error(
+    'Expected ReactFiberErrorDialog.showErrorDialog to be a function.',
+  );
 }
 
-function findNodeHandle(componentOrHandle: any): ?number {
-  if (__DEV__) {
-    const owner = ReactCurrentOwner.current;
-    if (owner !== null && owner.stateNode !== null) {
-      if (!owner.stateNode._warnedAboutRefsInRender) {
-        console.error(
-          '%s is accessing findNodeHandle inside its render(). ' +
-            'render() should be a pure function of props and state. It should ' +
-            'never access something that requires stale data from the previous ' +
-            'render, such as refs. Move this logic to componentDidMount and ' +
-            'componentDidUpdate instead.',
-          getComponentName(owner.type) || 'A component',
-        );
-      }
+function nativeOnUncaughtError(
+  error: mixed,
+  errorInfo: {+componentStack?: ?string},
+): void {
+  const componentStack =
+    errorInfo.componentStack != null ? errorInfo.componentStack : '';
+  const logError = ReactFiberErrorDialog.showErrorDialog({
+    errorBoundary: null,
+    error,
+    componentStack,
+  });
 
-      owner.stateNode._warnedAboutRefsInRender = true;
-    }
-  }
-  if (componentOrHandle == null) {
-    return null;
-  }
-  if (typeof componentOrHandle === 'number') {
-    // Already a node handle
-    return componentOrHandle;
-  }
-  if (componentOrHandle._nativeTag) {
-    return componentOrHandle._nativeTag;
-  }
-  if (componentOrHandle.canonical && componentOrHandle.canonical._nativeTag) {
-    return componentOrHandle.canonical._nativeTag;
-  }
-  let hostInstance;
-  if (__DEV__) {
-    hostInstance = findHostInstanceWithWarning(
-      componentOrHandle,
-      'findNodeHandle',
-    );
-  } else {
-    hostInstance = findHostInstance(componentOrHandle);
+  // Allow injected showErrorDialog() to prevent default console.error logging.
+  // This enables renderers like ReactNative to better manage redbox behavior.
+  if (logError === false) {
+    return;
   }
 
-  if (hostInstance == null) {
-    return hostInstance;
+  defaultOnUncaughtError(error, errorInfo);
+}
+function nativeOnCaughtError(
+  error: mixed,
+  errorInfo: {
+    +componentStack?: ?string,
+    +errorBoundary?: ?React$Component<any, any>,
+  },
+): void {
+  const errorBoundary = errorInfo.errorBoundary;
+  const componentStack =
+    errorInfo.componentStack != null ? errorInfo.componentStack : '';
+  const logError = ReactFiberErrorDialog.showErrorDialog({
+    errorBoundary,
+    error,
+    componentStack,
+  });
+
+  // Allow injected showErrorDialog() to prevent default console.error logging.
+  // This enables renderers like ReactNative to better manage redbox behavior.
+  if (logError === false) {
+    return;
   }
-  // TODO: the code is right but the types here are wrong.
-  // https://github.com/facebook/react/pull/12863
-  if ((hostInstance: any).canonical) {
-    // Fabric
-    return (hostInstance: any).canonical._nativeTag;
-  }
-  return hostInstance._nativeTag;
+
+  defaultOnCaughtError(error, errorInfo);
 }
 
-setBatchingImplementation(
-  batchedUpdatesImpl,
-  discreteUpdates,
-  flushDiscreteUpdates,
-  batchedEventUpdates,
-);
+function render(
+  element: Element<ElementType>,
+  containerTag: number,
+  callback: ?() => void,
+  concurrentRoot: ?boolean,
+  options: ?RenderRootOptions,
+): ?ElementRef<ElementType> {
+  if (disableLegacyMode && !concurrentRoot) {
+    throw new Error('render: Unsupported Legacy Mode API.');
+  }
 
-const roots = new Map();
+  let root = roots.get(containerTag);
 
-const ReactFabric: ReactFabricType = {
-  NativeComponent: ReactNativeComponent(findNodeHandle, findHostInstance),
+  if (!root) {
+    // TODO: these defaults are for backwards compatibility.
+    // Once RN implements these options internally,
+    // we can remove the defaults and ReactFiberErrorDialog.
+    let onUncaughtError = nativeOnUncaughtError;
+    let onCaughtError = nativeOnCaughtError;
+    let onRecoverableError = defaultOnRecoverableError;
 
+    if (options && options.onUncaughtError !== undefined) {
+      onUncaughtError = options.onUncaughtError;
+    }
+    if (options && options.onCaughtError !== undefined) {
+      onCaughtError = options.onCaughtError;
+    }
+    if (options && options.onRecoverableError !== undefined) {
+      onRecoverableError = options.onRecoverableError;
+    }
+
+    // TODO (bvaughn): If we decide to keep the wrapper component,
+    // We could create a wrapper for containerTag as well to reduce special casing.
+    root = createContainer(
+      containerTag,
+      concurrentRoot ? ConcurrentRoot : LegacyRoot,
+      null,
+      false,
+      null,
+      '',
+      onUncaughtError,
+      onCaughtError,
+      onRecoverableError,
+      null,
+    );
+    roots.set(containerTag, root);
+  }
+  updateContainer(element, root, null, callback);
+
+  return getPublicRootInstance(root);
+}
+
+// $FlowFixMe[missing-this-annot]
+function unmountComponentAtNode(containerTag: number) {
+  this.stopSurface(containerTag);
+}
+
+function stopSurface(containerTag: number) {
+  const root = roots.get(containerTag);
+  if (root) {
+    // TODO: Is it safe to reset this now or should I wait since this unmount could be deferred?
+    updateContainer(null, root, null, () => {
+      roots.delete(containerTag);
+    });
+  }
+}
+
+function createPortal(
+  children: ReactNodeList,
+  containerTag: number,
+  key: ?string = null,
+): ReactPortal {
+  return createPortalImpl(children, containerTag, null, key);
+}
+
+setBatchingImplementation(batchedUpdatesImpl, discreteUpdates);
+
+const roots = new Map<number, FiberRoot>();
+
+export {
   // This is needed for implementation details of TouchableNativeFeedback
   // Remove this once TouchableNativeFeedback doesn't use cloneElement
   findHostInstance_DEPRECATED,
   findNodeHandle,
-
-  dispatchCommand(handle: any, command: string, args: Array<any>) {
-    const invalid =
-      handle._nativeTag == null || handle._internalInstanceHandle == null;
-
-    if (invalid) {
-      if (__DEV__) {
-        if (invalid) {
-          console.error(
-            "dispatchCommand was called with a ref that isn't a " +
-              'native component. Use React.forwardRef to get access to the underlying native component',
-          );
-        }
-      }
-      return;
-    }
-
-    fabricDispatchCommand(
-      handle._internalInstanceHandle.stateNode.node,
-      command,
-      args,
-    );
-  },
-
-  render(element: React$Element<any>, containerTag: any, callback: ?Function) {
-    let root = roots.get(containerTag);
-
-    if (!root) {
-      // TODO (bvaughn): If we decide to keep the wrapper component,
-      // We could create a wrapper for containerTag as well to reduce special casing.
-      root = createContainer(containerTag, LegacyRoot, false, null);
-      roots.set(containerTag, root);
-    }
-    updateContainer(element, root, null, callback);
-
-    return getPublicRootInstance(root);
-  },
-
-  unmountComponentAtNode(containerTag: number) {
-    const root = roots.get(containerTag);
-    if (root) {
-      // TODO: Is it safe to reset this now or should I wait since this unmount could be deferred?
-      updateContainer(null, root, null, () => {
-        roots.delete(containerTag);
-      });
-    }
-  },
-
-  createPortal(
-    children: ReactNodeList,
-    containerTag: number,
-    key: ?string = null,
-  ) {
-    return createPortal(children, containerTag, null, key);
-  },
-
-  __SECRET_INTERNALS_DO_NOT_USE_OR_YOU_WILL_BE_FIRED: {
-    // Used as a mixin in many createClass-based components
-    NativeMethodsMixin: NativeMethodsMixin(findNodeHandle, findHostInstance),
-  },
+  dispatchCommand,
+  sendAccessibilityEvent,
+  render,
+  // Deprecated - this function is being renamed to stopSurface, use that instead.
+  // TODO (T47576999): Delete this once it's no longer called from native code.
+  unmountComponentAtNode,
+  stopSurface,
+  createPortal,
+  // This export is typically undefined in production builds.
+  // See the "enableGetInspectorDataForInstanceInProduction" flag.
+  getInspectorDataForInstance,
+  // The public instance has a reference to the internal instance handle.
+  // This method allows it to acess the most recent shadow node for
+  // the instance (it's only accessible through it).
+  getNodeFromInternalInstanceHandle,
+  // Fabric native methods to traverse the host tree return the same internal
+  // instance handles we use to dispatch events. This provides a way to access
+  // the public instances we created from them (potentially created lazily).
+  getPublicInstanceFromInternalInstanceHandle,
+  // DEV-only:
+  isChildPublicInstance,
 };
 
 injectIntoDevTools({
+  // $FlowExpectedError[incompatible-call] The type of `Instance` in `getClosestInstanceFromNode` does not match in Fabric and the legacy renderer, so it fails to typecheck here.
   findFiberByHostInstance: getClosestInstanceFromNode,
-  getInspectorDataForViewTag: getInspectorDataForViewTag,
   bundleType: __DEV__ ? 1 : 0,
   version: ReactVersion,
   rendererPackageName: 'react-native-renderer',
+  rendererConfig: {
+    getInspectorDataForInstance,
+    getInspectorDataForViewTag: getInspectorDataForViewTag,
+    getInspectorDataForViewAtPoint: getInspectorDataForViewAtPoint.bind(
+      null,
+      findNodeHandle,
+    ),
+  },
 });
-
-export default ReactFabric;

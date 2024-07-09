@@ -1,5 +1,5 @@
 /**
- * Copyright (c) Facebook, Inc. and its affiliates.
+ * Copyright (c) Meta Platforms, Inc. and affiliates.
  *
  * This source code is licensed under the MIT license found in the
  * LICENSE file in the root directory of this source tree.
@@ -7,9 +7,15 @@
  * @flow
  */
 
-import React, {Fragment, Suspense, SuspenseList, useState} from 'react';
+import * as React from 'react';
+import {
+  Fragment,
+  Suspense,
+  unstable_SuspenseList as SuspenseList,
+  useState,
+} from 'react';
 
-function SuspenseTree() {
+function SuspenseTree(): React.Node {
   return (
     <Fragment>
       <h1>Suspense</h1>
@@ -19,10 +25,16 @@ function SuspenseTree() {
       <PrimaryFallbackTest initialSuspend={true} />
       <NestedSuspenseTest />
       <SuspenseListTest />
+      <EmptySuspense />
     </Fragment>
   );
 }
 
+function EmptySuspense() {
+  return <Suspense />;
+}
+
+// $FlowFixMe[missing-local-annot]
 function PrimaryFallbackTest({initialSuspend}) {
   const [suspend, setSuspend] = useState(initialSuspend);
   const fallbackStep = useTestSequence('fallback', Fallback1, Fallback2);
@@ -45,14 +57,14 @@ function PrimaryFallbackTest({initialSuspend}) {
   );
 }
 
-function useTestSequence(label, T1, T2) {
-  let [step, setStep] = useState(0);
-  let next = (
+function useTestSequence(label: string, T1: any => any, T2: any => any) {
+  const [step, setStep] = useState(0);
+  const next: $FlowFixMe = (
     <button onClick={() => setStep(s => (s + 1) % allSteps.length)}>
       next {label} content
     </button>
   );
-  let allSteps = [
+  const allSteps: $FlowFixMe = [
     <Fragment>{next}</Fragment>,
     <Fragment>
       {next} <T1 prop={step}>mount</T1>
@@ -127,7 +139,7 @@ function SuspenseListTest() {
 }
 
 function LoadLater() {
-  const [loadChild, setLoadChild] = useState(0);
+  const [loadChild, setLoadChild] = useState(false);
   return (
     <Suspense
       fallback={

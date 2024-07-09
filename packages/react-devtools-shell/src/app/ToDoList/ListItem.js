@@ -1,5 +1,5 @@
 /**
- * Copyright (c) Facebook, Inc. and its affiliates.
+ * Copyright (c) Meta Platforms, Inc. and affiliates.
  *
  * This source code is licensed under the MIT license found in the
  * LICENSE file in the root directory of this source tree.
@@ -7,31 +7,26 @@
  * @flow
  */
 
-import React, {memo, useCallback} from 'react';
+import * as React from 'react';
+import {memo, useCallback} from 'react';
 import styles from './ListItem.css';
 
 import type {Item} from './List';
 
-type Props = {|
+type Props = {
   item: Item,
   removeItem: (item: Item) => void,
   toggleItem: (item: Item) => void,
-|};
+};
 
 function ListItem({item, removeItem, toggleItem}: Props) {
-  const handleDelete = useCallback(
-    () => {
-      removeItem(item);
-    },
-    [item, removeItem],
-  );
+  const handleDelete = useCallback(() => {
+    removeItem(item);
+  }, [item, removeItem]);
 
-  const handleToggle = useCallback(
-    () => {
-      toggleItem(item);
-    },
-    [item, toggleItem],
-  );
+  const handleToggle = useCallback(() => {
+    toggleItem(item);
+  }, [item, toggleItem]);
 
   return (
     <li className={styles.ListItem}>
@@ -51,4 +46,4 @@ function ListItem({item, removeItem, toggleItem}: Props) {
   );
 }
 
-export default memo<Props>(ListItem);
+export default (memo(ListItem): React.ComponentType<Props>);

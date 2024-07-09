@@ -1,5 +1,5 @@
 /**
- * Copyright (c) Facebook, Inc. and its affiliates.
+ * Copyright (c) Meta Platforms, Inc. and affiliates.
  *
  * This source code is licensed under the MIT license found in the
  * LICENSE file in the root directory of this source tree.
@@ -7,7 +7,8 @@
  * @flow
  */
 
-import React, {Fragment, useContext, useMemo} from 'react';
+import * as React from 'react';
+import {Fragment, useContext, useMemo} from 'react';
 import {StoreContext} from 'react-devtools-shared/src/devtools/views/context';
 import {useSubscription} from 'react-devtools-shared/src/devtools/views/hooks';
 import {NativeStyleContext} from './context';
@@ -15,9 +16,9 @@ import LayoutViewer from './LayoutViewer';
 import StyleEditor from './StyleEditor';
 import {TreeStateContext} from '../TreeContext';
 
-type Props = {||};
+type Props = {};
 
-export default function NativeStyleEditorWrapper(_: Props) {
+export default function NativeStyleEditorWrapper(_: Props): React.Node {
   const store = useContext(StoreContext);
 
   const subscription = useMemo(

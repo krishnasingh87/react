@@ -1,5 +1,5 @@
 /**
- * Copyright (c) Facebook, Inc. and its affiliates.
+ * Copyright (c) Meta Platforms, Inc. and affiliates.
  *
  * This source code is licensed under the MIT license found in the
  * LICENSE file in the root directory of this source tree.
@@ -7,19 +7,11 @@
  * @flow
  */
 
-declare module 'events' {
-  declare class EventEmitter<Events: Object> {
-    addListener<Event: $Keys<Events>>(
-      event: Event,
-      listener: (...$ElementType<Events, Event>) => any,
-    ): void;
-    emit: <Event: $Keys<Events>>(
-      event: Event,
-      ...$ElementType<Events, Event>
-    ) => void;
-    removeListener(event: $Keys<Events>, listener: Function): void;
-    removeAllListeners(event?: $Keys<Events>): void;
-  }
+/* eslint-disable no-unused-vars */
 
-  declare export default typeof EventEmitter;
-}
+declare const __EXTENSION__: boolean;
+declare const __TEST__: boolean;
+
+declare const __IS_FIREFOX__: boolean;
+declare const __IS_CHROME__: boolean;
+declare const __IS_EDGE__: boolean;

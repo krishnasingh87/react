@@ -1,5 +1,5 @@
 /**
- * Copyright (c) Facebook, Inc. and its affiliates.
+ * Copyright (c) Meta Platforms, Inc. and affiliates.
  *
  * This source code is licensed under the MIT license found in the
  * LICENSE file in the root directory of this source tree.
@@ -7,13 +7,8 @@
  * @flow
  */
 
-import React, {
-  useCallback,
-  useContext,
-  useEffect,
-  useMemo,
-  useRef,
-} from 'react';
+import * as React from 'react';
+import {useCallback, useContext, useEffect, useMemo, useRef} from 'react';
 import {SettingsModalContext} from './SettingsModalContext';
 import Button from '../Button';
 import ButtonIcon from '../ButtonIcon';
@@ -25,6 +20,7 @@ import {
   useSubscription,
 } from '../hooks';
 import ComponentsSettings from './ComponentsSettings';
+import DebuggingSettings from './DebuggingSettings';
 import GeneralSettings from './GeneralSettings';
 import ProfilerSettings from './ProfilerSettings';
 
@@ -32,7 +28,7 @@ import styles from './SettingsModal.css';
 
 type TabID = 'general' | 'components' | 'profiler';
 
-export default function SettingsModal(_: {||}) {
+export default function SettingsModal(_: {}): React.Node {
   const {isModalShowing, setIsModalShowing} = useContext(SettingsModalContext);
   const store = useContext(StoreContext);
   const {profilerStore} = store;
@@ -61,11 +57,12 @@ export default function SettingsModal(_: {||}) {
   return <SettingsModalImpl />;
 }
 
-function SettingsModalImpl(_: {||}) {
+function SettingsModalImpl(_: {}) {
   const {setIsModalShowing} = useContext(SettingsModalContext);
-  const dismissModal = useCallback(() => setIsModalShowing(false), [
-    setIsModalShowing,
-  ]);
+  const dismissModal = useCallback(
+    () => setIsModalShowing(false),
+    [setIsModalShowing],
+  );
 
   const [selectedTabID, selectTab] = useLocalStorage<TabID>(
     'React::DevTools::selectedSettingsTabID',
@@ -75,25 +72,26 @@ function SettingsModalImpl(_: {||}) {
   const modalRef = useRef<HTMLDivElement | null>(null);
   useModalDismissSignal(modalRef, dismissModal);
 
-  useEffect(
-    () => {
-      if (modalRef.current !== null) {
-        modalRef.current.focus();
-      }
-    },
-    [modalRef],
-  );
+  useEffect(() => {
+    if (modalRef.current !== null) {
+      modalRef.current.focus();
+    }
+  }, [modalRef]);
 
   let view = null;
   switch (selectedTabID) {
+    case 'components':
+      view = <ComponentsSettings />;
+      break;
+    // $FlowFixMe[incompatible-type] is this missing in TabID?
+    case 'debugging':
+      view = <DebuggingSettings />;
+      break;
     case 'general':
       view = <GeneralSettings />;
       break;
     case 'profiler':
       view = <ProfilerSettings />;
-      break;
-    case 'components':
-      view = <ComponentsSettings />;
       break;
     default:
       break;
@@ -126,6 +124,11 @@ const tabs = [
     id: 'general',
     icon: 'settings',
     label: 'General',
+  },
+  {
+    id: 'debugging',
+    icon: 'bug',
+    label: 'Debugging',
   },
   {
     id: 'components',

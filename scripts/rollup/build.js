@@ -1,15 +1,14 @@
 'use strict';
 
 const rollup = require('rollup');
-const babel = require('rollup-plugin-babel');
+const babel = require('@rollup/plugin-babel').babel;
 const closure = require('./plugins/closure-plugin');
-const commonjs = require('rollup-plugin-commonjs');
+const flowRemoveTypes = require('flow-remove-types');
 const prettier = require('rollup-plugin-prettier');
-const replace = require('rollup-plugin-replace');
+const replace = require('@rollup/plugin-replace');
 const stripBanner = require('rollup-plugin-strip-banner');
 const chalk = require('chalk');
-const path = require('path');
-const resolve = require('rollup-plugin-node-resolve');
+const resolve = require('@rollup/plugin-node-resolve').nodeResolve;
 const fs = require('fs');
 const argv = require('minimist')(process.argv.slice(2));
 const Modules = require('./modules');
@@ -18,11 +17,10 @@ const Stats = require('./stats');
 const Sync = require('./sync');
 const sizes = require('./plugins/sizes-plugin');
 const useForks = require('./plugins/use-forks-plugin');
-const stripUnusedImports = require('./plugins/strip-unused-imports');
-const extractErrorCodes = require('../error-codes/extract-errors');
+const dynamicImports = require('./plugins/dynamic-imports');
 const Packaging = require('./packaging');
-const {asyncCopyTo, asyncRimRaf} = require('./utils');
-const codeFrame = require('babel-code-frame');
+const {asyncRimRaf} = require('./utils');
+const codeFrame = require('@babel/code-frame');
 const Wrappers = require('./wrappers');
 
 const RELEASE_CHANNEL = process.env.RELEASE_CHANNEL;
@@ -45,12 +43,14 @@ process.on('unhandledRejection', err => {
 });
 
 const {
-  UMD_DEV,
-  UMD_PROD,
-  UMD_PROFILING,
+  NODE_ES2015,
+  ESM_DEV,
+  ESM_PROD,
   NODE_DEV,
   NODE_PROD,
   NODE_PROFILING,
+  BUN_DEV,
+  BUN_PROD,
   FB_WWW_DEV,
   FB_WWW_PROD,
   FB_WWW_PROFILING,
@@ -60,7 +60,10 @@ const {
   RN_FB_DEV,
   RN_FB_PROD,
   RN_FB_PROFILING,
+  BROWSER_SCRIPT,
 } = Bundles.bundleTypes;
+
+const {getFilename} = Bundles;
 
 function parseRequestedNames(names, toCase) {
   let result = [];
@@ -82,47 +85,72 @@ function parseRequestedNames(names, toCase) {
   return result;
 }
 
+const argvType = Array.isArray(argv.type) ? argv.type : [argv.type];
 const requestedBundleTypes = argv.type
-  ? parseRequestedNames([argv.type], 'uppercase')
+  ? parseRequestedNames(argvType, 'uppercase')
   : [];
+
 const requestedBundleNames = parseRequestedNames(argv._, 'lowercase');
 const forcePrettyOutput = argv.pretty;
 const isWatchMode = argv.watch;
 const syncFBSourcePath = argv['sync-fbsource'];
 const syncWWWPath = argv['sync-www'];
-const shouldExtractErrors = argv['extract-errors'];
-const errorCodeOpts = {
-  errorMapFilePath: 'scripts/error-codes/codes.json',
-};
 
-const closureOptions = {
-  compilation_level: 'SIMPLE',
-  language_in: 'ECMASCRIPT5_STRICT',
-  language_out: 'ECMASCRIPT5_STRICT',
-  env: 'CUSTOM',
-  warning_level: 'QUIET',
-  apply_input_source_maps: false,
-  use_types_for_optimization: false,
-  process_common_js_modules: false,
-  rewrite_polyfills: false,
-};
+// Non-ES2015 stuff applied before closure compiler.
+const babelPlugins = [
+  // These plugins filter out non-ES2015.
+  ['@babel/plugin-proposal-class-properties', {loose: true}],
+  'syntax-trailing-function-commas',
+  // These use loose mode which avoids embedding a runtime.
+  // TODO: Remove object spread from the source. Prefer Object.assign instead.
+  [
+    '@babel/plugin-proposal-object-rest-spread',
+    {loose: true, useBuiltIns: true},
+  ],
+  ['@babel/plugin-transform-template-literals', {loose: true}],
+  // TODO: Remove for...of from the source. It requires a runtime to be embedded.
+  '@babel/plugin-transform-for-of',
+  // TODO: Remove array spread from the source. Prefer .apply instead.
+  ['@babel/plugin-transform-spread', {loose: true, useBuiltIns: true}],
+  '@babel/plugin-transform-parameters',
+  // TODO: Remove array destructuring from the source. Requires runtime.
+  ['@babel/plugin-transform-destructuring', {loose: true, useBuiltIns: true}],
+  // Transform Object spread to shared/assign
+  require('../babel/transform-object-assign'),
+];
+
+const babelToES5Plugins = [
+  // These plugins transform DEV mode. Closure compiler deals with these in PROD.
+  '@babel/plugin-transform-literals',
+  '@babel/plugin-transform-arrow-functions',
+  '@babel/plugin-transform-block-scoped-functions',
+  '@babel/plugin-transform-shorthand-properties',
+  '@babel/plugin-transform-computed-properties',
+  ['@babel/plugin-transform-block-scoping', {throwIfClosureRequired: true}],
+];
 
 function getBabelConfig(
   updateBabelOptions,
   bundleType,
   packageName,
   externals,
-  isDevelopment
+  isDevelopment,
+  bundle
 ) {
   const canAccessReactObject =
     packageName === 'react' || externals.indexOf('react') !== -1;
   let options = {
     exclude: '/**/node_modules/**',
+    babelrc: false,
+    configFile: false,
     presets: [],
-    plugins: [],
+    plugins: [...babelPlugins],
+    babelHelpers: 'bundled',
+    sourcemap: false,
   };
   if (isDevelopment) {
     options.plugins.push(
+      ...babelToES5Plugins,
       // Turn console.error/warn() into a custom wrapper
       [
         require('../babel/transform-replace-console-calls'),
@@ -135,49 +163,43 @@ function getBabelConfig(
   if (updateBabelOptions) {
     options = updateBabelOptions(options);
   }
-  switch (bundleType) {
-    case FB_WWW_DEV:
-    case FB_WWW_PROD:
-    case FB_WWW_PROFILING:
-      return Object.assign({}, options, {
-        plugins: options.plugins.concat([
-          // Minify invariant messages
-          require('../error-codes/transform-error-messages'),
-        ]),
-      });
-    case RN_OSS_DEV:
-    case RN_OSS_PROD:
-    case RN_OSS_PROFILING:
-    case RN_FB_DEV:
-    case RN_FB_PROD:
-    case RN_FB_PROFILING:
-      return Object.assign({}, options, {
-        plugins: options.plugins.concat([
-          [
-            require('../error-codes/transform-error-messages'),
-            // Preserve full error messages in React Native build
-            {noMinify: true},
-          ],
-        ]),
-      });
-    case UMD_DEV:
-    case UMD_PROD:
-    case UMD_PROFILING:
-    case NODE_DEV:
-    case NODE_PROD:
-    case NODE_PROFILING:
-      return Object.assign({}, options, {
-        plugins: options.plugins.concat([
-          // Use object-assign polyfill in open source
-          path.resolve('./scripts/babel/transform-object-assign-require'),
-          // Minify invariant messages
-          require('../error-codes/transform-error-messages'),
-        ]),
-      });
-    default:
-      return options;
+  // Controls whether to replace error messages with error codes in production.
+  // By default, error messages are replaced in production.
+  if (!isDevelopment && bundle.minifyWithProdErrorCodes !== false) {
+    options.plugins.push(require('../error-codes/transform-error-messages'));
   }
+
+  return options;
 }
+
+let getRollupInteropValue = id => {
+  // We're setting Rollup to assume that imports are ES modules unless otherwise specified.
+  // However, we also compile ES import syntax to `require()` using Babel.
+  // This causes Rollup to turn uses of `import SomeDefaultImport from 'some-module' into
+  // references to `SomeDefaultImport.default` due to CJS/ESM interop.
+  // Some CJS modules don't have a `.default` export, and the rewritten import is incorrect.
+  // Specifying `interop: 'default'` instead will have Rollup use the imported variable as-is,
+  // without adding a `.default` to the reference.
+  const modulesWithCommonJsExports = [
+    'art/core/transform',
+    'art/modes/current',
+    'art/modes/fast-noSideEffects',
+    'art/modes/svg',
+    'JSResourceReferenceImpl',
+    'error-stack-parser',
+    'neo-async',
+    'webpack/lib/dependencies/ModuleDependency',
+    'webpack/lib/dependencies/NullDependency',
+    'webpack/lib/Template',
+  ];
+
+  if (modulesWithCommonJsExports.includes(id)) {
+    return 'default';
+  }
+
+  // For all other modules, handle imports without any import helper utils
+  return 'esModule';
+};
 
 function getRollupOutputOptions(
   outputPath,
@@ -188,29 +210,27 @@ function getRollupOutputOptions(
 ) {
   const isProduction = isProductionBundleType(bundleType);
 
-  return Object.assign(
-    {},
-    {
-      file: outputPath,
-      format,
-      globals,
-      freeze: !isProduction,
-      interop: false,
-      name: globalName,
-      sourcemap: false,
-    }
-  );
+  return {
+    file: outputPath,
+    format,
+    globals,
+    freeze: !isProduction,
+    interop: getRollupInteropValue,
+    name: globalName,
+    sourcemap: false,
+    esModule: false,
+    exports: 'auto',
+  };
 }
 
 function getFormat(bundleType) {
   switch (bundleType) {
-    case UMD_DEV:
-    case UMD_PROD:
-    case UMD_PROFILING:
-      return `umd`;
+    case NODE_ES2015:
     case NODE_DEV:
     case NODE_PROD:
     case NODE_PROFILING:
+    case BUN_DEV:
+    case BUN_PROD:
     case FB_WWW_DEV:
     case FB_WWW_PROD:
     case FB_WWW_PROFILING:
@@ -221,51 +241,28 @@ function getFormat(bundleType) {
     case RN_FB_PROD:
     case RN_FB_PROFILING:
       return `cjs`;
-  }
-}
-
-function getFilename(name, globalName, bundleType) {
-  // we do this to replace / to -, for react-dom/server
-  name = name.replace('/', '-');
-  switch (bundleType) {
-    case UMD_DEV:
-      return `${name}.development.js`;
-    case UMD_PROD:
-      return `${name}.production.min.js`;
-    case UMD_PROFILING:
-      return `${name}.profiling.min.js`;
-    case NODE_DEV:
-      return `${name}.development.js`;
-    case NODE_PROD:
-      return `${name}.production.min.js`;
-    case NODE_PROFILING:
-      return `${name}.profiling.min.js`;
-    case FB_WWW_DEV:
-    case RN_OSS_DEV:
-    case RN_FB_DEV:
-      return `${globalName}-dev.js`;
-    case FB_WWW_PROD:
-    case RN_OSS_PROD:
-    case RN_FB_PROD:
-      return `${globalName}-prod.js`;
-    case FB_WWW_PROFILING:
-    case RN_FB_PROFILING:
-    case RN_OSS_PROFILING:
-      return `${globalName}-profiling.js`;
+    case ESM_DEV:
+    case ESM_PROD:
+      return `es`;
+    case BROWSER_SCRIPT:
+      return `iife`;
   }
 }
 
 function isProductionBundleType(bundleType) {
   switch (bundleType) {
-    case UMD_DEV:
+    case NODE_ES2015:
+      return true;
+    case ESM_DEV:
     case NODE_DEV:
+    case BUN_DEV:
     case FB_WWW_DEV:
     case RN_OSS_DEV:
     case RN_FB_DEV:
       return false;
-    case UMD_PROD:
+    case ESM_PROD:
     case NODE_PROD:
-    case UMD_PROFILING:
+    case BUN_PROD:
     case NODE_PROFILING:
     case FB_WWW_PROD:
     case FB_WWW_PROFILING:
@@ -273,6 +270,7 @@ function isProductionBundleType(bundleType) {
     case RN_OSS_PROFILING:
     case RN_FB_PROD:
     case RN_FB_PROFILING:
+    case BROWSER_SCRIPT:
       return true;
     default:
       throw new Error(`Unknown type: ${bundleType}`);
@@ -281,26 +279,57 @@ function isProductionBundleType(bundleType) {
 
 function isProfilingBundleType(bundleType) {
   switch (bundleType) {
+    case NODE_ES2015:
     case FB_WWW_DEV:
     case FB_WWW_PROD:
     case NODE_DEV:
     case NODE_PROD:
+    case BUN_DEV:
+    case BUN_PROD:
     case RN_FB_DEV:
     case RN_FB_PROD:
     case RN_OSS_DEV:
     case RN_OSS_PROD:
-    case UMD_DEV:
-    case UMD_PROD:
+    case ESM_DEV:
+    case ESM_PROD:
+    case BROWSER_SCRIPT:
       return false;
     case FB_WWW_PROFILING:
     case NODE_PROFILING:
     case RN_FB_PROFILING:
     case RN_OSS_PROFILING:
-    case UMD_PROFILING:
       return true;
     default:
       throw new Error(`Unknown type: ${bundleType}`);
   }
+}
+
+function getBundleTypeFlags(bundleType) {
+  const isFBWWWBundle =
+    bundleType === FB_WWW_DEV ||
+    bundleType === FB_WWW_PROD ||
+    bundleType === FB_WWW_PROFILING;
+  const isRNBundle =
+    bundleType === RN_OSS_DEV ||
+    bundleType === RN_OSS_PROD ||
+    bundleType === RN_OSS_PROFILING ||
+    bundleType === RN_FB_DEV ||
+    bundleType === RN_FB_PROD ||
+    bundleType === RN_FB_PROFILING;
+
+  const isFBRNBundle =
+    bundleType === RN_FB_DEV ||
+    bundleType === RN_FB_PROD ||
+    bundleType === RN_FB_PROFILING;
+
+  const shouldStayReadable = isFBWWWBundle || isRNBundle || forcePrettyOutput;
+
+  return {
+    isFBWWWBundle,
+    isRNBundle,
+    isFBRNBundle,
+    shouldStayReadable,
+  };
 }
 
 function forbidFBJSImports() {
@@ -326,122 +355,173 @@ function getPlugins(
   bundleType,
   globalName,
   moduleType,
-  pureExternalModules
+  pureExternalModules,
+  bundle
 ) {
-  const findAndRecordErrorCodes = extractErrorCodes(errorCodeOpts);
-  const forks = Modules.getForks(bundleType, entry, moduleType);
-  const isProduction = isProductionBundleType(bundleType);
-  const isProfiling = isProfilingBundleType(bundleType);
-  const isUMDBundle =
-    bundleType === UMD_DEV ||
-    bundleType === UMD_PROD ||
-    bundleType === UMD_PROFILING;
-  const isFBBundle =
-    bundleType === FB_WWW_DEV ||
-    bundleType === FB_WWW_PROD ||
-    bundleType === FB_WWW_PROFILING;
-  const isRNBundle =
-    bundleType === RN_OSS_DEV ||
-    bundleType === RN_OSS_PROD ||
-    bundleType === RN_OSS_PROFILING ||
-    bundleType === RN_FB_DEV ||
-    bundleType === RN_FB_PROD ||
-    bundleType === RN_FB_PROFILING;
-  const shouldStayReadable = isFBBundle || isRNBundle || forcePrettyOutput;
-  return [
-    // Extract error codes from invariant() messages into a file.
-    shouldExtractErrors && {
-      transform(source) {
-        findAndRecordErrorCodes(source);
-        return source;
+  try {
+    const forks = Modules.getForks(bundleType, entry, moduleType, bundle);
+    const isProduction = isProductionBundleType(bundleType);
+    const isProfiling = isProfilingBundleType(bundleType);
+
+    const needsMinifiedByClosure =
+      bundleType !== ESM_PROD && bundleType !== ESM_DEV;
+
+    return [
+      // Keep dynamic imports as externals
+      dynamicImports(),
+      {
+        name: 'rollup-plugin-flow-remove-types',
+        transform(code) {
+          const transformed = flowRemoveTypes(code);
+          return {
+            code: transformed.toString(),
+            map: null,
+          };
+        },
       },
-    },
-    // Shim any modules that need forking in this environment.
-    useForks(forks),
-    // Ensure we don't try to bundle any fbjs modules.
-    forbidFBJSImports(),
-    // Replace any externals with their valid internal FB mappings
-    isFBBundle && replace(Bundles.fbBundleExternalsMap),
-    // Use Node resolution mechanism.
-    resolve({
-      skip: externals,
-    }),
-    // Remove license headers from individual modules
-    stripBanner({
-      exclude: 'node_modules/**/*',
-    }),
-    // Compile to ES5.
-    babel(
-      getBabelConfig(
-        updateBabelOptions,
-        bundleType,
-        packageName,
-        externals,
-        !isProduction
-      )
-    ),
-    // Remove 'use strict' from individual source files.
-    {
-      transform(source) {
-        return source.replace(/['"]use strict["']/g, '');
-      },
-    },
-    // Turn __DEV__ and process.env checks into constants.
-    replace({
-      __DEV__: isProduction ? 'false' : 'true',
-      __PROFILE__: isProfiling || !isProduction ? 'true' : 'false',
-      __UMD__: isUMDBundle ? 'true' : 'false',
-      'process.env.NODE_ENV': isProduction ? "'production'" : "'development'",
-      __EXPERIMENTAL__,
-    }),
-    // We still need CommonJS for external deps like object-assign.
-    commonjs(),
-    // Apply dead code elimination and/or minification.
-    isProduction &&
-      closure(
-        Object.assign({}, closureOptions, {
-          // Don't let it create global variables in the browser.
-          // https://github.com/facebook/react/issues/10909
-          assume_function_wrapper: !isUMDBundle,
-          renaming: !shouldStayReadable,
-        })
-      ),
-    // HACK to work around the fact that Rollup isn't removing unused, pure-module imports.
-    // Note that this plugin must be called after closure applies DCE.
-    isProduction && stripUnusedImports(pureExternalModules),
-    // Add the whitespace back if necessary.
-    shouldStayReadable && prettier({parser: 'babylon'}),
-    // License and haste headers, top-level `if` blocks.
-    {
-      transformBundle(source) {
-        return Wrappers.wrapBundle(
-          source,
-          bundleType,
-          globalName,
-          filename,
-          moduleType
-        );
-      },
-    },
-    // Record bundle size.
-    sizes({
-      getSize: (size, gzip) => {
-        const currentSizes = Stats.currentBuildResults.bundleSizes;
-        const recordIndex = currentSizes.findIndex(
-          record =>
-            record.filename === filename && record.bundleType === bundleType
-        );
-        const index = recordIndex !== -1 ? recordIndex : currentSizes.length;
-        currentSizes[index] = {
-          filename,
+      // Shim any modules that need forking in this environment.
+      useForks(forks),
+      // Ensure we don't try to bundle any fbjs modules.
+      forbidFBJSImports(),
+      // Use Node resolution mechanism.
+      resolve({
+        // skip: externals, // TODO: options.skip was removed in @rollup/plugin-node-resolve 3.0.0
+      }),
+      // Remove license headers from individual modules
+      stripBanner({
+        exclude: 'node_modules/**/*',
+      }),
+      // Compile to ES2015.
+      babel(
+        getBabelConfig(
+          updateBabelOptions,
           bundleType,
           packageName,
-          size,
-          gzip,
-        };
+          externals,
+          !isProduction,
+          bundle
+        )
+      ),
+      // Remove 'use strict' from individual source files.
+      {
+        name: "remove 'use strict'",
+        transform(source) {
+          return source.replace(/['"]use strict["']/g, '');
+        },
       },
-    }),
-  ].filter(Boolean);
+      // Turn __DEV__ and process.env checks into constants.
+      replace({
+        preventAssignment: true,
+        values: {
+          __DEV__: isProduction ? 'false' : 'true',
+          __PROFILE__: isProfiling || !isProduction ? 'true' : 'false',
+          'process.env.NODE_ENV': isProduction
+            ? "'production'"
+            : "'development'",
+          __EXPERIMENTAL__,
+        },
+      }),
+      {
+        name: 'top-level-definitions',
+        renderChunk(source) {
+          return Wrappers.wrapWithTopLevelDefinitions(
+            source,
+            bundleType,
+            globalName,
+            filename,
+            moduleType,
+            bundle.wrapWithModuleBoundaries
+          );
+        },
+      },
+      // For production builds, compile with Closure. We do this even for the
+      // "non-minified" production builds because Closure is much better at
+      // minification than what most applications use. During this step, we do
+      // preserve the original symbol names, though, so the resulting code is
+      // relatively readable.
+      //
+      // For the minified builds, the names will be mangled later.
+      //
+      // We don't bother with sourcemaps at this step. The sourcemaps we publish
+      // are only for whitespace and symbol renaming; they don't map back to
+      // before Closure was applied.
+      needsMinifiedByClosure &&
+        closure({
+          compilation_level: 'SIMPLE',
+          language_in: 'ECMASCRIPT_2020',
+          language_out:
+            bundleType === NODE_ES2015
+              ? 'ECMASCRIPT_2020'
+              : bundleType === BROWSER_SCRIPT
+              ? 'ECMASCRIPT5'
+              : 'ECMASCRIPT5_STRICT',
+          emit_use_strict:
+            bundleType !== BROWSER_SCRIPT &&
+            bundleType !== ESM_PROD &&
+            bundleType !== ESM_DEV,
+          env: 'CUSTOM',
+          warning_level: 'QUIET',
+          source_map_include_content: true,
+          use_types_for_optimization: false,
+          process_common_js_modules: false,
+          rewrite_polyfills: false,
+          inject_libraries: false,
+          allow_dynamic_import: true,
+
+          // Don't let it create global variables in the browser.
+          // https://github.com/facebook/react/issues/10909
+          assume_function_wrapper: true,
+
+          // Don't rename symbols (variable names, functions, etc). We leave
+          // this up to the application to handle, if they want. Otherwise gzip
+          // takes care of it.
+          renaming: false,
+        }),
+      needsMinifiedByClosure &&
+        // Add the whitespace back
+        prettier({
+          parser: 'flow',
+          singleQuote: false,
+          trailingComma: 'none',
+          bracketSpacing: true,
+        }),
+      {
+        name: 'license-and-signature-header',
+        renderChunk(source) {
+          return Wrappers.wrapWithLicenseHeader(
+            source,
+            bundleType,
+            globalName,
+            filename,
+            moduleType
+          );
+        },
+      },
+      // Record bundle size.
+      sizes({
+        getSize: (size, gzip) => {
+          const currentSizes = Stats.currentBuildResults.bundleSizes;
+          const recordIndex = currentSizes.findIndex(
+            record =>
+              record.filename === filename && record.bundleType === bundleType
+          );
+          const index = recordIndex !== -1 ? recordIndex : currentSizes.length;
+          currentSizes[index] = {
+            filename,
+            bundleType,
+            packageName,
+            size,
+            gzip,
+          };
+        },
+      }),
+    ].filter(Boolean);
+  } catch (error) {
+    console.error(
+      chalk.red(`There was an error preparing plugins for entry "${entry}"`)
+    );
+    throw error;
+  }
 }
 
 function shouldSkipBundle(bundle, bundleType) {
@@ -450,21 +530,29 @@ function shouldSkipBundle(bundle, bundleType) {
     return true;
   }
   if (requestedBundleTypes.length > 0) {
-    const isAskingForDifferentType = requestedBundleTypes.every(
-      requestedType => bundleType.indexOf(requestedType) === -1
+    const isAskingForDifferentType = requestedBundleTypes.some(
+      requestedType => !bundleType.includes(requestedType)
     );
     if (isAskingForDifferentType) {
       return true;
     }
   }
   if (requestedBundleNames.length > 0) {
+    // If the name ends with `something/index` we only match if the
+    // entry ends in something. Such as `react-dom/index` only matches
+    // `react-dom` but not `react-dom/server`. Everything else is fuzzy
+    // search.
+    const entryLowerCase = bundle.entry.toLowerCase() + '/index.js';
     const isAskingForDifferentNames = requestedBundleNames.every(
-      // If the name ends with `something/index` we only match if the
-      // entry ends in something. Such as `react-dom/index` only matches
-      // `react-dom` but not `react-dom/server`. Everything else is fuzzy
-      // search.
-      requestedName =>
-        (bundle.entry + '/index.js').indexOf(requestedName) === -1
+      requestedName => {
+        const matchEntry = entryLowerCase.indexOf(requestedName) !== -1;
+        if (!bundle.name) {
+          return !matchEntry;
+        }
+        const matchName =
+          bundle.name.toLowerCase().indexOf(requestedName) !== -1;
+        return !matchEntry && !matchName;
+      }
     );
     if (isAskingForDifferentNames) {
       return true;
@@ -473,43 +561,79 @@ function shouldSkipBundle(bundle, bundleType) {
   return false;
 }
 
-async function createBundle(bundle, bundleType) {
-  if (shouldSkipBundle(bundle, bundleType)) {
-    return;
-  }
+function resolveEntryFork(resolvedEntry, isFBBundle) {
+  // Pick which entry point fork to use:
+  // .modern.fb.js
+  // .classic.fb.js
+  // .fb.js
+  // .stable.js
+  // .experimental.js
+  // .js
+  // or any of those plus .development.js
 
-  const filename = getFilename(bundle.entry, bundle.global, bundleType);
+  if (isFBBundle) {
+    const resolvedFBEntry = resolvedEntry.replace(
+      '.js',
+      __EXPERIMENTAL__ ? '.modern.fb.js' : '.classic.fb.js'
+    );
+    const developmentFBEntry = resolvedFBEntry.replace(
+      '.js',
+      '.development.js'
+    );
+    if (fs.existsSync(developmentFBEntry)) {
+      return developmentFBEntry;
+    }
+    if (fs.existsSync(resolvedFBEntry)) {
+      return resolvedFBEntry;
+    }
+    const resolvedGenericFBEntry = resolvedEntry.replace('.js', '.fb.js');
+    const developmentGenericFBEntry = resolvedGenericFBEntry.replace(
+      '.js',
+      '.development.js'
+    );
+    if (fs.existsSync(developmentGenericFBEntry)) {
+      return developmentGenericFBEntry;
+    }
+    if (fs.existsSync(resolvedGenericFBEntry)) {
+      return resolvedGenericFBEntry;
+    }
+    // Even if it's a FB bundle we fallthrough to pick stable or experimental if we don't have an FB fork.
+  }
+  const resolvedForkedEntry = resolvedEntry.replace(
+    '.js',
+    __EXPERIMENTAL__ ? '.experimental.js' : '.stable.js'
+  );
+  const devForkedEntry = resolvedForkedEntry.replace('.js', '.development.js');
+  if (fs.existsSync(devForkedEntry)) {
+    return devForkedEntry;
+  }
+  if (fs.existsSync(resolvedForkedEntry)) {
+    return resolvedForkedEntry;
+  }
+  // Just use the plain .js one.
+  return resolvedEntry;
+}
+
+async function createBundle(bundle, bundleType) {
+  const filename = getFilename(bundle, bundleType);
   const logKey =
     chalk.white.bold(filename) + chalk.dim(` (${bundleType.toLowerCase()})`);
   const format = getFormat(bundleType);
   const packageName = Packaging.getPackageName(bundle.entry);
 
-  let resolvedEntry = require.resolve(bundle.entry);
-  const isFBBundle =
-    bundleType === FB_WWW_DEV ||
-    bundleType === FB_WWW_PROD ||
-    bundleType === FB_WWW_PROFILING;
-  if (isFBBundle) {
-    const resolvedFBEntry = resolvedEntry.replace('.js', '.fb.js');
-    if (fs.existsSync(resolvedFBEntry)) {
-      resolvedEntry = resolvedFBEntry;
-    }
-  }
+  const {isFBWWWBundle, isFBRNBundle} = getBundleTypeFlags(bundleType);
 
-  const shouldBundleDependencies =
-    bundleType === UMD_DEV ||
-    bundleType === UMD_PROD ||
-    bundleType === UMD_PROFILING;
+  let resolvedEntry = resolveEntryFork(
+    require.resolve(bundle.entry),
+    isFBWWWBundle || isFBRNBundle,
+    !isProductionBundleType(bundleType)
+  );
+
   const peerGlobals = Modules.getPeerGlobals(bundle.externals, bundleType);
   let externals = Object.keys(peerGlobals);
-  if (!shouldBundleDependencies) {
-    const deps = Modules.getDependencies(bundleType, bundle.entry);
-    externals = externals.concat(deps);
-  }
-  if (isFBBundle) {
-    // Add any mapped fb bundle externals
-    externals = externals.concat(Object.values(Bundles.fbBundleExternalsMap));
-  }
+
+  const deps = Modules.getDependencies(bundleType, bundle.entry);
+  externals = externals.concat(deps);
 
   const importSideEffects = Modules.getImportSideEffects();
   const pureExternalModules = Object.keys(importSideEffects).filter(
@@ -519,12 +643,25 @@ async function createBundle(bundle, bundleType) {
   const rollupConfig = {
     input: resolvedEntry,
     treeshake: {
-      pureExternalModules,
+      moduleSideEffects: (id, external) =>
+        !(external && pureExternalModules.includes(id)),
+      propertyReadSideEffects: false,
     },
     external(id) {
       const containsThisModule = pkg => id === pkg || id.startsWith(pkg + '/');
       const isProvidedByDependency = externals.some(containsThisModule);
-      if (!shouldBundleDependencies && isProvidedByDependency) {
+      if (isProvidedByDependency) {
+        if (id.indexOf('/src/') !== -1) {
+          throw Error(
+            'You are trying to import ' +
+              id +
+              ' but ' +
+              externals.find(containsThisModule) +
+              ' is one of npm dependencies, ' +
+              'so it will not contain that source file. You probably want ' +
+              'to create a new bundle entry point for it instead.'
+          );
+        }
         return true;
       }
       return !!peerGlobals[id];
@@ -539,19 +676,23 @@ async function createBundle(bundle, bundleType) {
       bundleType,
       bundle.global,
       bundle.moduleType,
-      pureExternalModules
+      pureExternalModules,
+      bundle
     ),
-    // We can't use getters in www.
-    legacy:
-      bundleType === FB_WWW_DEV ||
-      bundleType === FB_WWW_PROD ||
-      bundleType === FB_WWW_PROFILING,
+    output: {
+      externalLiveBindings: false,
+      freeze: false,
+      interop: getRollupInteropValue,
+      esModule: false,
+    },
   };
-  const [mainOutputPath, ...otherOutputPaths] = Packaging.getBundleOutputPaths(
+  const mainOutputPath = Packaging.getBundleOutputPath(
+    bundle,
     bundleType,
     filename,
     packageName
   );
+
   const rollupOutputOptions = getRollupOutputOptions(
     mainOutputPath,
     format,
@@ -569,9 +710,6 @@ async function createBundle(bundle, bundleType) {
           console.log(`${chalk.bgYellow.black(' BUILDING ')} ${logKey}`);
           break;
         case 'BUNDLE_END':
-          for (let i = 0; i < otherOutputPaths.length; i++) {
-            await asyncCopyTo(mainOutputPath, otherOutputPaths[i]);
-          }
           console.log(`${chalk.bgGreen.black(' COMPLETE ')} ${logKey}\n`);
           break;
         case 'ERROR':
@@ -591,16 +729,13 @@ async function createBundle(bundle, bundleType) {
       handleRollupError(error);
       throw error;
     }
-    for (let i = 0; i < otherOutputPaths.length; i++) {
-      await asyncCopyTo(mainOutputPath, otherOutputPaths[i]);
-    }
     console.log(`${chalk.bgGreen.black(' COMPLETE ')} ${logKey}\n`);
   }
 }
 
 function handleRollupWarning(warning) {
   if (warning.code === 'UNUSED_EXTERNAL_IMPORT') {
-    const match = warning.message.match(/external module '([^']+)'/);
+    const match = warning.message.match(/external module "([^"]+)"/);
     if (!match || typeof match[1] !== 'string') {
       throw new Error(
         'Could not parse a Rollup warning. ' + 'Fix this method.'
@@ -621,7 +756,9 @@ function handleRollupWarning(warning) {
     return;
   }
 
-  if (typeof warning.code === 'string') {
+  if (warning.code === 'CIRCULAR_DEPENDENCY') {
+    // Ignored
+  } else if (typeof warning.code === 'string') {
     // This is a warning coming from Rollup itself.
     // These tend to be important (e.g. clashes in namespaced exports)
     // so we'll fail the build on any of them.
@@ -678,31 +815,32 @@ async function buildEverything() {
   // eslint-disable-next-line no-for-of-loops/no-for-of-loops
   for (const bundle of Bundles.bundles) {
     bundles.push(
-      [bundle, UMD_DEV],
-      [bundle, UMD_PROD],
-      [bundle, UMD_PROFILING],
+      [bundle, NODE_ES2015],
+      [bundle, ESM_DEV],
+      [bundle, ESM_PROD],
       [bundle, NODE_DEV],
       [bundle, NODE_PROD],
       [bundle, NODE_PROFILING],
+      [bundle, BUN_DEV],
+      [bundle, BUN_PROD],
+      [bundle, FB_WWW_DEV],
+      [bundle, FB_WWW_PROD],
+      [bundle, FB_WWW_PROFILING],
       [bundle, RN_OSS_DEV],
       [bundle, RN_OSS_PROD],
-      [bundle, RN_OSS_PROFILING]
+      [bundle, RN_OSS_PROFILING],
+      [bundle, RN_FB_DEV],
+      [bundle, RN_FB_PROD],
+      [bundle, RN_FB_PROFILING],
+      [bundle, BROWSER_SCRIPT]
     );
-
-    if (__EXPERIMENTAL__) {
-      // FB specific builds are experimental-only.
-      bundles.push(
-        [bundle, FB_WWW_DEV],
-        [bundle, FB_WWW_PROD],
-        [bundle, FB_WWW_PROFILING],
-        [bundle, RN_FB_DEV],
-        [bundle, RN_FB_PROD],
-        [bundle, RN_FB_PROFILING]
-      );
-    }
   }
 
-  if (!shouldExtractErrors && process.env.CIRCLE_NODE_TOTAL) {
+  bundles = bundles.filter(([bundle, bundleType]) => {
+    return !shouldSkipBundle(bundle, bundleType);
+  });
+
+  if (process.env.CIRCLE_NODE_TOTAL) {
     // In CI, parallelize bundles across multiple tasks.
     const nodeTotal = parseInt(process.env.CIRCLE_NODE_TOTAL, 10);
     const nodeIndex = parseInt(process.env.CIRCLE_NODE_INDEX, 10);
@@ -726,14 +864,6 @@ async function buildEverything() {
   console.log(Stats.printResults());
   if (!forcePrettyOutput) {
     Stats.saveResults();
-  }
-
-  if (shouldExtractErrors) {
-    console.warn(
-      '\nWarning: this build was created with --extract-errors enabled.\n' +
-        'this will result in extremely slow builds and should only be\n' +
-        'used when the error map needs to be rebuilt.\n'
-    );
   }
 }
 

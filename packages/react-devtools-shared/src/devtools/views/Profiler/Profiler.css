@@ -11,6 +11,11 @@
   color: var(--color-text);
 }
 
+.Profiler, .Profiler * {
+  box-sizing: border-box;
+  -webkit-font-smoothing: var(--font-smoothing);
+}
+
 .LeftColumn {
   display: flex;
   flex-direction: column;
@@ -54,6 +59,12 @@
   flex-direction: row;
   align-items: center;
   justify-content: center;
+}
+
+.LearnMoreRow {
+  margin-top: 1rem;
+  color: var(--color-dim);
+  font-size: var(--font-size-sans-small);
 }
 
 .Header {
@@ -109,4 +120,16 @@
 
 .Link {
   color: var(--color-button);
+}
+
+.TimelineSearchInputContainer {
+  flex: 1 1;
+  display: flex;
+  align-items: center;
+}
+
+.LearnMoreLink {
+  color: var(--color-link);
+  margin-left: 0.25rem;
+  margin-right: 0.25rem;
 }

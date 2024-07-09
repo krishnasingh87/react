@@ -4,9 +4,10 @@ module.exports = {
   out: 'output.js',
   optimize: 'none',
   paths: {
-    react: '../../../../build/node_modules/react/umd/react.development',
+    react: '../../../../build/oss-experimental/react/umd/react.development',
     'react-dom':
-      '../../../../build/node_modules/react-dom/umd/react-dom.development',
-    schedule: '../../../../build/dist/schedule.development',
+      '../../../../build/oss-experimental/react-dom/umd/react-dom.development',
+    schedule:
+      '../../../../build/oss-experimental/scheduler/umd/schedule.development',
   },
 };

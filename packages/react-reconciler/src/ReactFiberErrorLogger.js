@@ -1,5 +1,5 @@
 /**
- * Copyright (c) Facebook, Inc. and its affiliates.
+ * Copyright (c) Meta Platforms, Inc. and affiliates.
  *
  * This source code is licensed under the MIT license found in the
  * LICENSE file in the root directory of this source tree.
@@ -7,82 +7,214 @@
  * @flow
  */
 
-import type {CapturedError} from './ReactCapturedValue';
+import type {Fiber, FiberRoot} from './ReactInternalTypes';
+import type {CapturedValue} from './ReactCapturedValue';
 
-import {showErrorDialog} from './ReactFiberErrorDialog';
+import getComponentNameFromFiber from 'react-reconciler/src/getComponentNameFromFiber';
 
-export function logCapturedError(capturedError: CapturedError): void {
-  const logError = showErrorDialog(capturedError);
+import {ClassComponent} from './ReactWorkTags';
 
-  // Allow injected showErrorDialog() to prevent default console.error logging.
-  // This enables renderers like ReactNative to better manage redbox behavior.
-  if (logError === false) {
-    return;
-  }
+import reportGlobalError from 'shared/reportGlobalError';
 
-  const error = (capturedError.error: any);
+import ReactSharedInternals from 'shared/ReactSharedInternals';
+
+import {enableOwnerStacks} from 'shared/ReactFeatureFlags';
+
+import {printToConsole} from './ReactFiberConfig';
+
+// Side-channel since I'm not sure we want to make this part of the public API
+let componentName: null | string = null;
+let errorBoundaryName: null | string = null;
+
+export function defaultOnUncaughtError(
+  error: mixed,
+  errorInfo: {+componentStack?: ?string},
+): void {
+  // Overriding this can silence these warnings e.g. for tests.
+  // See https://github.com/facebook/react/pull/13384
+
+  // For uncaught root errors we report them as uncaught to the browser's
+  // onerror callback. This won't have component stacks and the error addendum.
+  // So we add those into a separate console.warn.
+  reportGlobalError(error);
   if (__DEV__) {
-    const {
-      componentName,
-      componentStack,
-      errorBoundaryName,
-      errorBoundaryFound,
-      willRetry,
-    } = capturedError;
-
-    // Browsers support silencing uncaught errors by calling
-    // `preventDefault()` in window `error` handler.
-    // We record this information as an expando on the error.
-    if (error != null && error._suppressLogging) {
-      if (errorBoundaryFound && willRetry) {
-        // The error is recoverable and was silenced.
-        // Ignore it and don't print the stack addendum.
-        // This is handy for testing error boundaries without noise.
-        return;
-      }
-      // The error is fatal. Since the silencing might have
-      // been accidental, we'll surface it anyway.
-      // However, the browser would have silenced the original error
-      // so we'll print it first, and then print the stack addendum.
-      console['error'](error); // Don't transform to our wrapper
-      // For a more detailed description of this block, see:
-      // https://github.com/facebook/react/pull/13384
-    }
-
     const componentNameMessage = componentName
-      ? `The above error occurred in the <${componentName}> component:`
-      : 'The above error occurred in one of your React components:';
+      ? `An error occurred in the <${componentName}> component.`
+      : 'An error occurred in one of your React components.';
 
-    let errorBoundaryMessage;
-    // errorBoundaryFound check is sufficient; errorBoundaryName check is to satisfy Flow.
-    if (errorBoundaryFound && errorBoundaryName) {
-      if (willRetry) {
-        errorBoundaryMessage =
-          `React will try to recreate this component tree from scratch ` +
-          `using the error boundary you provided, ${errorBoundaryName}.`;
+    const errorBoundaryMessage =
+      'Consider adding an error boundary to your tree to customize error handling behavior.\n' +
+      'Visit https://react.dev/link/error-boundaries to learn more about error boundaries.';
+
+    if (enableOwnerStacks) {
+      console.warn(
+        '%s\n\n%s\n',
+        componentNameMessage,
+        errorBoundaryMessage,
+        // We let our console.error wrapper add the component stack to the end.
+      );
+    } else {
+      // The current Fiber is disconnected at this point which means that console printing
+      // cannot add a component stack since it terminates at the deletion node. This is not
+      // a problem for owner stacks which are not disconnected but for the parent component
+      // stacks we need to use the snapshot we've previously extracted.
+      const componentStack =
+        errorInfo.componentStack != null ? errorInfo.componentStack : '';
+      // Don't transform to our wrapper
+      console['warn'](
+        '%s\n\n%s\n%s',
+        componentNameMessage,
+        errorBoundaryMessage,
+        componentStack,
+      );
+    }
+  }
+}
+
+export function defaultOnCaughtError(
+  error: mixed,
+  errorInfo: {
+    +componentStack?: ?string,
+    +errorBoundary?: ?React$Component<any, any>,
+  },
+): void {
+  // Overriding this can silence these warnings e.g. for tests.
+  // See https://github.com/facebook/react/pull/13384
+
+  // Caught by error boundary
+  if (__DEV__) {
+    const componentNameMessage = componentName
+      ? `The above error occurred in the <${componentName}> component.`
+      : 'The above error occurred in one of your React components.';
+
+    // In development, we provide our own message which includes the component stack
+    // in addition to the error.
+    const recreateMessage =
+      `React will try to recreate this component tree from scratch ` +
+      `using the error boundary you provided, ${
+        errorBoundaryName || 'Anonymous'
+      }.`;
+
+    if (enableOwnerStacks) {
+      if (
+        typeof error === 'object' &&
+        error !== null &&
+        typeof error.environmentName === 'string'
+      ) {
+        // This was a Server error. We print the environment name in a badge just like we do with
+        // replays of console logs to indicate that the source of this throw as actually the Server.
+        printToConsole(
+          'error',
+          [
+            '%o\n\n%s\n\n%s\n',
+            error,
+            componentNameMessage,
+            recreateMessage,
+            // We let our consoleWithStackDev wrapper add the component stack to the end.
+          ],
+          error.environmentName,
+        );
       } else {
-        errorBoundaryMessage =
-          `This error was initially handled by the error boundary ${errorBoundaryName}.\n` +
-          `Recreating the tree from scratch failed so React will unmount the tree.`;
+        console.error(
+          '%o\n\n%s\n\n%s\n',
+          error,
+          componentNameMessage,
+          recreateMessage,
+          // We let our consoleWithStackDev wrapper add the component stack to the end.
+        );
       }
     } else {
-      errorBoundaryMessage =
-        'Consider adding an error boundary to your tree to customize error handling behavior.\n' +
-        'Visit https://fb.me/react-error-boundaries to learn more about error boundaries.';
+      // The current Fiber is disconnected at this point which means that console printing
+      // cannot add a component stack since it terminates at the deletion node. This is not
+      // a problem for owner stacks which are not disconnected but for the parent component
+      // stacks we need to use the snapshot we've previously extracted.
+      const componentStack =
+        errorInfo.componentStack != null ? errorInfo.componentStack : '';
+      // Don't transform to our wrapper
+      console['error'](
+        '%o\n\n%s\n\n%s\n%s',
+        error,
+        componentNameMessage,
+        recreateMessage,
+        componentStack,
+      );
     }
-    const combinedMessage =
-      `${componentNameMessage}${componentStack}\n\n` +
-      `${errorBoundaryMessage}`;
-
-    // In development, we provide our own message with just the component stack.
-    // We don't include the original error message and JS stack because the browser
-    // has already printed it. Even if the application swallows the error, it is still
-    // displayed by the browser thanks to the DEV-only fake event trick in ReactErrorUtils.
-    console['error'](combinedMessage); // Don't transform to our wrapper
   } else {
     // In production, we print the error directly.
     // This will include the message, the JS stack, and anything the browser wants to show.
     // We pass the error object instead of custom message so that the browser displays the error natively.
-    console['error'](error); // Don't transform to our wrapper
+    console['error'](error); // Don't transform to our wrapper, however, React DevTools can still add a stack.
+  }
+}
+
+export function defaultOnRecoverableError(
+  error: mixed,
+  errorInfo: {+componentStack?: ?string},
+) {
+  reportGlobalError(error);
+}
+
+export function logUncaughtError(
+  root: FiberRoot,
+  errorInfo: CapturedValue<mixed>,
+): void {
+  try {
+    if (__DEV__) {
+      componentName = errorInfo.source
+        ? getComponentNameFromFiber(errorInfo.source)
+        : null;
+      errorBoundaryName = null;
+    }
+    const error = (errorInfo.value: any);
+    if (__DEV__ && ReactSharedInternals.actQueue !== null) {
+      // For uncaught errors inside act, we track them on the act and then
+      // rethrow them into the test.
+      ReactSharedInternals.thrownErrors.push(error);
+      return;
+    }
+    const onUncaughtError = root.onUncaughtError;
+    onUncaughtError(error, {
+      componentStack: errorInfo.stack,
+    });
+  } catch (e) {
+    // This method must not throw, or React internal state will get messed up.
+    // If console.error is overridden, or logCapturedError() shows a dialog that throws,
+    // we want to report this error outside of the normal stack as a last resort.
+    // https://github.com/facebook/react/issues/13188
+    setTimeout(() => {
+      throw e;
+    });
+  }
+}
+
+export function logCaughtError(
+  root: FiberRoot,
+  boundary: Fiber,
+  errorInfo: CapturedValue<mixed>,
+): void {
+  try {
+    if (__DEV__) {
+      componentName = errorInfo.source
+        ? getComponentNameFromFiber(errorInfo.source)
+        : null;
+      errorBoundaryName = getComponentNameFromFiber(boundary);
+    }
+    const error = (errorInfo.value: any);
+    const onCaughtError = root.onCaughtError;
+    onCaughtError(error, {
+      componentStack: errorInfo.stack,
+      errorBoundary:
+        boundary.tag === ClassComponent
+          ? boundary.stateNode // This should always be the case as long as we only have class boundaries
+          : null,
+    });
+  } catch (e) {
+    // This method must not throw, or React internal state will get messed up.
+    // If console.error is overridden, or logCapturedError() shows a dialog that throws,
+    // we want to report this error outside of the normal stack as a last resort.
+    // https://github.com/facebook/react/issues/13188
+    setTimeout(() => {
+      throw e;
+    });
   }
 }

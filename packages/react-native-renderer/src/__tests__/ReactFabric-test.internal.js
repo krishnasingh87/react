@@ -1,5 +1,5 @@
 /**
- * Copyright (c) Facebook, Inc. and its affiliates.
+ * Copyright (c) Meta Platforms, Inc. and affiliates.
  *
  * This source code is licensed under the MIT license found in the
  * LICENSE file in the root directory of this source tree.
@@ -12,23 +12,18 @@
 
 let React;
 let ReactFabric;
-let ReactFeatureFlags;
-let createReactClass;
+let ReactNativePrivateInterface;
 let createReactNativeComponentClass;
-let UIManager;
 let StrictMode;
-let NativeMethodsMixin;
-
-const SET_NATIVE_PROPS_NOT_SUPPORTED_MESSAGE =
-  'Warning: setNativeProps is not currently supported in Fabric';
+let act;
 
 const DISPATCH_COMMAND_REQUIRES_HOST_COMPONENT =
-  "Warning: dispatchCommand was called with a ref that isn't a " +
+  "dispatchCommand was called with a ref that isn't a " +
   'native component. Use React.forwardRef to get access to the underlying native component';
 
-jest.mock('shared/ReactFeatureFlags', () =>
-  require('shared/forks/ReactFeatureFlags.native-oss'),
-);
+const SEND_ACCESSIBILITY_EVENT_REQUIRES_HOST_COMPONENT =
+  "sendAccessibilityEvent was called with a ref that isn't a " +
+  'native component. Use React.forwardRef to get access to the underlying native component';
 
 describe('ReactFabric', () => {
   beforeEach(() => {
@@ -39,34 +34,28 @@ describe('ReactFabric', () => {
     React = require('react');
     StrictMode = React.StrictMode;
     ReactFabric = require('react-native-renderer/fabric');
-    ReactFeatureFlags = require('shared/ReactFeatureFlags');
-    UIManager = require('react-native/Libraries/ReactPrivate/ReactNativePrivateInterface')
-      .UIManager;
-    createReactClass = require('create-react-class/factory')(
-      React.Component,
-      React.isValidElement,
-      new React.Component().updater,
-    );
-    createReactNativeComponentClass = require('react-native/Libraries/ReactPrivate/ReactNativePrivateInterface')
-      .ReactNativeViewConfigRegistry.register;
-    NativeMethodsMixin =
-      ReactFabric.__SECRET_INTERNALS_DO_NOT_USE_OR_YOU_WILL_BE_FIRED
-        .NativeMethodsMixin;
+    ReactNativePrivateInterface = require('react-native/Libraries/ReactPrivate/ReactNativePrivateInterface');
+    createReactNativeComponentClass =
+      require('react-native/Libraries/ReactPrivate/ReactNativePrivateInterface')
+        .ReactNativeViewConfigRegistry.register;
+    act = require('internal-test-utils').act;
   });
 
-  it('should be able to create and render a native component', () => {
+  it('should be able to create and render a native component', async () => {
     const View = createReactNativeComponentClass('RCTView', () => ({
       validAttributes: {foo: true},
       uiViewClassName: 'RCTView',
     }));
 
-    ReactFabric.render(<View foo="test" />, 1);
+    await act(() => {
+      ReactFabric.render(<View foo="test" />, 1, null, true);
+    });
     expect(nativeFabricUIManager.createNode).toBeCalled();
     expect(nativeFabricUIManager.appendChild).not.toBeCalled();
     expect(nativeFabricUIManager.completeRoot).toBeCalled();
   });
 
-  it('should be able to create and update a native component', () => {
+  it('should be able to create and update a native component', async () => {
     const View = createReactNativeComponentClass('RCTView', () => ({
       validAttributes: {foo: true},
       uiViewClassName: 'RCTView',
@@ -76,11 +65,15 @@ describe('ReactFabric', () => {
 
     nativeFabricUIManager.createNode.mockReturnValue(firstNode);
 
-    ReactFabric.render(<View foo="foo" />, 11);
+    await act(() => {
+      ReactFabric.render(<View foo="foo" />, 11, null, true);
+    });
 
     expect(nativeFabricUIManager.createNode).toHaveBeenCalledTimes(1);
 
-    ReactFabric.render(<View foo="bar" />, 11);
+    await act(() => {
+      ReactFabric.render(<View foo="bar" />, 11, null, true);
+    });
 
     expect(nativeFabricUIManager.createNode).toHaveBeenCalledTimes(1);
     expect(nativeFabricUIManager.cloneNodeWithNewProps).toHaveBeenCalledTimes(
@@ -96,13 +89,15 @@ describe('ReactFabric', () => {
     });
   });
 
-  it('should not call FabricUIManager.cloneNode after render for properties that have not changed', () => {
+  it('should not call FabricUIManager.cloneNode after render for properties that have not changed', async () => {
     const Text = createReactNativeComponentClass('RCTText', () => ({
       validAttributes: {foo: true},
       uiViewClassName: 'RCTText',
     }));
 
-    ReactFabric.render(<Text foo="a">1</Text>, 11);
+    await act(() => {
+      ReactFabric.render(<Text foo="a">1</Text>, 11, null, true);
+    });
     expect(nativeFabricUIManager.cloneNode).not.toBeCalled();
     expect(nativeFabricUIManager.cloneNodeWithNewChildren).not.toBeCalled();
     expect(nativeFabricUIManager.cloneNodeWithNewProps).not.toBeCalled();
@@ -111,7 +106,9 @@ describe('ReactFabric', () => {
     ).not.toBeCalled();
 
     // If no properties have changed, we shouldn't call cloneNode.
-    ReactFabric.render(<Text foo="a">1</Text>, 11);
+    await act(() => {
+      ReactFabric.render(<Text foo="a">1</Text>, 11, null, true);
+    });
     expect(nativeFabricUIManager.cloneNode).not.toBeCalled();
     expect(nativeFabricUIManager.cloneNodeWithNewChildren).not.toBeCalled();
     expect(nativeFabricUIManager.cloneNodeWithNewProps).not.toBeCalled();
@@ -120,7 +117,9 @@ describe('ReactFabric', () => {
     ).not.toBeCalled();
 
     // Only call cloneNode for the changed property (and not for text).
-    ReactFabric.render(<Text foo="b">1</Text>, 11);
+    await act(() => {
+      ReactFabric.render(<Text foo="b">1</Text>, 11, null, true);
+    });
     expect(nativeFabricUIManager.cloneNode).not.toBeCalled();
     expect(nativeFabricUIManager.cloneNodeWithNewChildren).not.toBeCalled();
     expect(nativeFabricUIManager.cloneNodeWithNewProps).toHaveBeenCalledTimes(
@@ -131,7 +130,9 @@ describe('ReactFabric', () => {
     ).not.toBeCalled();
 
     // Only call cloneNode for the changed text (and no other properties).
-    ReactFabric.render(<Text foo="b">2</Text>, 11);
+    await act(() => {
+      ReactFabric.render(<Text foo="b">2</Text>, 11, null, true);
+    });
     expect(nativeFabricUIManager.cloneNode).not.toBeCalled();
     expect(
       nativeFabricUIManager.cloneNodeWithNewChildren,
@@ -144,7 +145,9 @@ describe('ReactFabric', () => {
     ).not.toBeCalled();
 
     // Call cloneNode for both changed text and properties.
-    ReactFabric.render(<Text foo="c">3</Text>, 11);
+    await act(() => {
+      ReactFabric.render(<Text foo="c">3</Text>, 11, null, true);
+    });
     expect(nativeFabricUIManager.cloneNode).not.toBeCalled();
     expect(
       nativeFabricUIManager.cloneNodeWithNewChildren,
@@ -157,18 +160,22 @@ describe('ReactFabric', () => {
     ).toHaveBeenCalledTimes(1);
   });
 
-  it('should only pass props diffs to FabricUIManager.cloneNode', () => {
+  it('should only pass props diffs to FabricUIManager.cloneNode', async () => {
     const Text = createReactNativeComponentClass('RCTText', () => ({
       validAttributes: {foo: true, bar: true},
       uiViewClassName: 'RCTText',
     }));
 
-    ReactFabric.render(
-      <Text foo="a" bar="a">
-        1
-      </Text>,
-      11,
-    );
+    await act(() => {
+      ReactFabric.render(
+        <Text foo="a" bar="a">
+          1
+        </Text>,
+        11,
+        null,
+        true,
+      );
+    });
     expect(nativeFabricUIManager.cloneNode).not.toBeCalled();
     expect(nativeFabricUIManager.cloneNodeWithNewChildren).not.toBeCalled();
     expect(nativeFabricUIManager.cloneNodeWithNewProps).not.toBeCalled();
@@ -176,350 +183,260 @@ describe('ReactFabric', () => {
       nativeFabricUIManager.cloneNodeWithNewChildrenAndProps,
     ).not.toBeCalled();
 
-    ReactFabric.render(
-      <Text foo="a" bar="b">
-        1
-      </Text>,
-      11,
-    );
+    await act(() => {
+      ReactFabric.render(
+        <Text foo="a" bar="b">
+          1
+        </Text>,
+        11,
+        null,
+        true,
+      );
+    });
     expect(
       nativeFabricUIManager.cloneNodeWithNewProps.mock.calls[0][1],
     ).toEqual({
       bar: 'b',
     });
-    expect(
-      nativeFabricUIManager.__dumpHierarchyForJestTestsOnly(),
-    ).toMatchSnapshot();
+    expect(nativeFabricUIManager.__dumpHierarchyForJestTestsOnly()).toBe(`11
+ RCTText {"foo":"a","bar":"b"}
+   RCTRawText {"text":"1"}`);
 
-    ReactFabric.render(
-      <Text foo="b" bar="b">
-        2
-      </Text>,
-      11,
-    );
+    await act(() => {
+      ReactFabric.render(
+        <Text foo="b" bar="b">
+          2
+        </Text>,
+        11,
+        null,
+        true,
+      );
+    });
+    const argIndex = gate(flags => flags.passChildrenWhenCloningPersistedNodes)
+      ? 2
+      : 1;
     expect(
-      nativeFabricUIManager.cloneNodeWithNewChildrenAndProps.mock.calls[0][1],
+      nativeFabricUIManager.cloneNodeWithNewChildrenAndProps.mock.calls[0][
+        argIndex
+      ],
     ).toEqual({
       foo: 'b',
     });
+    expect(nativeFabricUIManager.__dumpHierarchyForJestTestsOnly()).toBe(`11
+ RCTText {"foo":"b","bar":"b"}
+   RCTRawText {"text":"2"}`);
+  });
+
+  it('should not clone nodes without children when updating props', async () => {
+    const View = createReactNativeComponentClass('RCTView', () => ({
+      validAttributes: {foo: true},
+      uiViewClassName: 'RCTView',
+    }));
+
+    const Component = ({foo}) => (
+      <View>
+        <View foo={foo} />
+      </View>
+    );
+
+    await act(() =>
+      ReactFabric.render(<Component foo={true} />, 11, null, true),
+    );
+    expect(nativeFabricUIManager.completeRoot).toBeCalled();
+    jest.clearAllMocks();
+
+    await act(() =>
+      ReactFabric.render(<Component foo={false} />, 11, null, true),
+    );
+    expect(nativeFabricUIManager.cloneNode).not.toBeCalled();
+    expect(nativeFabricUIManager.cloneNodeWithNewProps).toHaveBeenCalledTimes(
+      1,
+    );
+    expect(nativeFabricUIManager.cloneNodeWithNewProps).toHaveBeenCalledWith(
+      expect.anything(),
+      {foo: false},
+    );
+
     expect(
-      nativeFabricUIManager.__dumpHierarchyForJestTestsOnly(),
-    ).toMatchSnapshot();
-  });
-
-  it('should not call UIManager.updateView from ref.setNativeProps', () => {
-    const View = createReactNativeComponentClass('RCTView', () => ({
-      validAttributes: {foo: true},
-      uiViewClassName: 'RCTView',
-    }));
-
-    class Subclass extends ReactFabric.NativeComponent {
-      render() {
-        return <View />;
-      }
+      nativeFabricUIManager.cloneNodeWithNewChildren,
+    ).toHaveBeenCalledTimes(1);
+    if (gate(flags => flags.passChildrenWhenCloningPersistedNodes)) {
+      expect(
+        nativeFabricUIManager.cloneNodeWithNewChildren,
+      ).toHaveBeenCalledWith(expect.anything(), [
+        expect.objectContaining({props: {foo: false}}),
+      ]);
+      expect(nativeFabricUIManager.appendChild).not.toBeCalled();
+    } else {
+      expect(
+        nativeFabricUIManager.cloneNodeWithNewChildren,
+      ).toHaveBeenCalledWith(expect.anything());
+      expect(nativeFabricUIManager.appendChild).toHaveBeenCalledTimes(1);
     }
-
-    const CreateClass = createReactClass({
-      mixins: [NativeMethodsMixin],
-      render: () => {
-        return <View />;
-      },
-    });
-
-    [View, Subclass, CreateClass].forEach(Component => {
-      UIManager.updateView.mockReset();
-
-      let viewRef;
-      ReactFabric.render(
-        <Component
-          foo="bar"
-          ref={ref => {
-            viewRef = ref;
-          }}
-        />,
-        11,
-      );
-      expect(UIManager.updateView).not.toBeCalled();
-
-      expect(() => {
-        viewRef.setNativeProps({});
-      }).toErrorDev([SET_NATIVE_PROPS_NOT_SUPPORTED_MESSAGE], {
-        withoutStack: true,
-      });
-
-      expect(UIManager.updateView).not.toBeCalled();
-
-      expect(() => {
-        viewRef.setNativeProps({foo: 'baz'});
-      }).toErrorDev([SET_NATIVE_PROPS_NOT_SUPPORTED_MESSAGE], {
-        withoutStack: true,
-      });
-      expect(UIManager.updateView).not.toBeCalled();
-    });
+    expect(
+      nativeFabricUIManager.cloneNodeWithNewChildrenAndProps,
+    ).not.toBeCalled();
+    expect(nativeFabricUIManager.completeRoot).toBeCalled();
   });
 
-  it('should call dispatchCommand for native refs', () => {
+  it('should call dispatchCommand for native refs', async () => {
     const View = createReactNativeComponentClass('RCTView', () => ({
       validAttributes: {foo: true},
       uiViewClassName: 'RCTView',
     }));
 
-    [View].forEach(Component => {
-      nativeFabricUIManager.dispatchCommand.mockClear();
+    nativeFabricUIManager.dispatchCommand.mockClear();
 
-      let viewRef;
+    let viewRef;
+    await act(() => {
       ReactFabric.render(
-        <Component
+        <View
           ref={ref => {
             viewRef = ref;
           }}
         />,
         11,
-      );
-
-      expect(nativeFabricUIManager.dispatchCommand).not.toBeCalled();
-      ReactFabric.dispatchCommand(viewRef, 'updateCommand', [10, 20]);
-      expect(nativeFabricUIManager.dispatchCommand).toHaveBeenCalledTimes(1);
-      expect(nativeFabricUIManager.dispatchCommand).toHaveBeenCalledWith(
-        expect.any(Object),
-        'updateCommand',
-        [10, 20],
+        null,
+        true,
       );
     });
+
+    expect(nativeFabricUIManager.dispatchCommand).not.toBeCalled();
+    ReactFabric.dispatchCommand(viewRef, 'updateCommand', [10, 20]);
+    expect(nativeFabricUIManager.dispatchCommand).toHaveBeenCalledTimes(1);
+    expect(nativeFabricUIManager.dispatchCommand).toHaveBeenCalledWith(
+      expect.any(Object),
+      'updateCommand',
+      [10, 20],
+    );
   });
 
-  it('should warn and no-op if calling dispatchCommand on non native refs', () => {
-    const View = createReactNativeComponentClass('RCTView', () => ({
-      validAttributes: {foo: true},
-      uiViewClassName: 'RCTView',
-    }));
-
+  it('should warn and no-op if calling dispatchCommand on non native refs', async () => {
     class BasicClass extends React.Component {
       render() {
         return <React.Fragment />;
       }
     }
 
-    class Subclass extends ReactFabric.NativeComponent {
-      render() {
-        return <View />;
-      }
-    }
+    nativeFabricUIManager.dispatchCommand.mockReset();
 
-    const CreateClass = createReactClass({
-      mixins: [NativeMethodsMixin],
-      render: () => {
-        return <View />;
-      },
-    });
-
-    [BasicClass, Subclass, CreateClass].forEach(Component => {
-      nativeFabricUIManager.dispatchCommand.mockReset();
-
-      let viewRef;
+    let viewRef;
+    await act(() => {
       ReactFabric.render(
-        <Component
+        <BasicClass
           ref={ref => {
             viewRef = ref;
           }}
         />,
         11,
+        null,
+        true,
       );
-
-      expect(nativeFabricUIManager.dispatchCommand).not.toBeCalled();
-      expect(() => {
-        ReactFabric.dispatchCommand(viewRef, 'updateCommand', [10, 20]);
-      }).toErrorDev([DISPATCH_COMMAND_REQUIRES_HOST_COMPONENT], {
-        withoutStack: true,
-      });
-
-      expect(nativeFabricUIManager.dispatchCommand).not.toBeCalled();
     });
+
+    expect(nativeFabricUIManager.dispatchCommand).not.toBeCalled();
+    expect(() => {
+      ReactFabric.dispatchCommand(viewRef, 'updateCommand', [10, 20]);
+    }).toErrorDev([DISPATCH_COMMAND_REQUIRES_HOST_COMPONENT], {
+      withoutStack: true,
+    });
+
+    expect(nativeFabricUIManager.dispatchCommand).not.toBeCalled();
   });
 
-  it('should call FabricUIManager.measure on ref.measure', () => {
+  it('should call sendAccessibilityEvent for native refs', async () => {
     const View = createReactNativeComponentClass('RCTView', () => ({
       validAttributes: {foo: true},
       uiViewClassName: 'RCTView',
     }));
 
-    class Subclass extends ReactFabric.NativeComponent {
-      render() {
-        return <View>{this.props.children}</View>;
-      }
-    }
+    nativeFabricUIManager.sendAccessibilityEvent.mockClear();
 
-    const CreateClass = createReactClass({
-      mixins: [NativeMethodsMixin],
-      render() {
-        return <View>{this.props.children}</View>;
-      },
-    });
-
-    [View, Subclass, CreateClass].forEach(Component => {
-      nativeFabricUIManager.measure.mockClear();
-
-      let viewRef;
+    let viewRef;
+    await act(() => {
       ReactFabric.render(
-        <Component
+        <View
           ref={ref => {
             viewRef = ref;
           }}
         />,
         11,
+        null,
+        true,
       );
-
-      expect(nativeFabricUIManager.measure).not.toBeCalled();
-      const successCallback = jest.fn();
-      viewRef.measure(successCallback);
-      expect(nativeFabricUIManager.measure).toHaveBeenCalledTimes(1);
-      expect(successCallback).toHaveBeenCalledTimes(1);
-      expect(successCallback).toHaveBeenCalledWith(10, 10, 100, 100, 0, 0);
     });
+
+    expect(nativeFabricUIManager.sendAccessibilityEvent).not.toBeCalled();
+    ReactFabric.sendAccessibilityEvent(viewRef, 'focus');
+    expect(nativeFabricUIManager.sendAccessibilityEvent).toHaveBeenCalledTimes(
+      1,
+    );
+    expect(nativeFabricUIManager.sendAccessibilityEvent).toHaveBeenCalledWith(
+      expect.any(Object),
+      'focus',
+    );
   });
 
-  it('should call FabricUIManager.measureInWindow on ref.measureInWindow', () => {
-    const View = createReactNativeComponentClass('RCTView', () => ({
-      validAttributes: {foo: true},
-      uiViewClassName: 'RCTView',
-    }));
-
-    class Subclass extends ReactFabric.NativeComponent {
+  it('should warn and no-op if calling sendAccessibilityEvent on non native refs', async () => {
+    class BasicClass extends React.Component {
       render() {
-        return <View>{this.props.children}</View>;
+        return <React.Fragment />;
       }
     }
 
-    const CreateClass = createReactClass({
-      mixins: [NativeMethodsMixin],
-      render() {
-        return <View>{this.props.children}</View>;
-      },
-    });
+    nativeFabricUIManager.sendAccessibilityEvent.mockReset();
 
-    [View, Subclass, CreateClass].forEach(Component => {
-      nativeFabricUIManager.measureInWindow.mockClear();
-
-      let viewRef;
+    let viewRef;
+    await act(() => {
       ReactFabric.render(
-        <Component
+        <BasicClass
           ref={ref => {
             viewRef = ref;
           }}
         />,
         11,
+        null,
+        true,
       );
-
-      expect(nativeFabricUIManager.measureInWindow).not.toBeCalled();
-      const successCallback = jest.fn();
-      viewRef.measureInWindow(successCallback);
-      expect(nativeFabricUIManager.measureInWindow).toHaveBeenCalledTimes(1);
-      expect(successCallback).toHaveBeenCalledTimes(1);
-      expect(successCallback).toHaveBeenCalledWith(10, 10, 100, 100);
     });
+
+    expect(nativeFabricUIManager.sendAccessibilityEvent).not.toBeCalled();
+    expect(() => {
+      ReactFabric.sendAccessibilityEvent(viewRef, 'eventTypeName');
+    }).toErrorDev([SEND_ACCESSIBILITY_EVENT_REQUIRES_HOST_COMPONENT], {
+      withoutStack: true,
+    });
+
+    expect(nativeFabricUIManager.sendAccessibilityEvent).not.toBeCalled();
   });
 
-  it('should support ref in ref.measureLayout', () => {
+  it('calls the callback with the correct instance and returns null', async () => {
     const View = createReactNativeComponentClass('RCTView', () => ({
       validAttributes: {foo: true},
       uiViewClassName: 'RCTView',
     }));
 
-    [View].forEach(Component => {
-      nativeFabricUIManager.measureLayout.mockClear();
-
-      let viewRef;
-      let otherRef;
-      ReactFabric.render(
-        <Component>
-          <Component
-            foo="bar"
-            ref={ref => {
-              viewRef = ref;
-            }}
-          />
-          <View
-            ref={ref => {
-              otherRef = ref;
-            }}
-          />
-        </Component>,
+    let a;
+    let b;
+    let c;
+    await act(() => {
+      c = ReactFabric.render(
+        <View foo="foo" ref={v => (a = v)} />,
         11,
-      );
-
-      expect(nativeFabricUIManager.measureLayout).not.toBeCalled();
-      const successCallback = jest.fn();
-      const failureCallback = jest.fn();
-      viewRef.measureLayout(otherRef, successCallback, failureCallback);
-      expect(nativeFabricUIManager.measureLayout).toHaveBeenCalledTimes(1);
-      expect(successCallback).toHaveBeenCalledTimes(1);
-      expect(successCallback).toHaveBeenCalledWith(1, 1, 100, 100);
-    });
-  });
-
-  it('should warn when calling measureLayout on Subclass and NativeMethodsMixin', () => {
-    const View = createReactNativeComponentClass('RCTView', () => ({
-      validAttributes: {foo: true},
-      uiViewClassName: 'RCTView',
-    }));
-
-    class Subclass extends ReactFabric.NativeComponent {
-      render() {
-        return <View>{this.props.children}</View>;
-      }
-    }
-
-    const CreateClass = createReactClass({
-      mixins: [NativeMethodsMixin],
-      render() {
-        return <View>{this.props.children}</View>;
-      },
-    });
-
-    [Subclass, CreateClass].forEach(Component => {
-      nativeFabricUIManager.measureLayout.mockReset();
-
-      let viewRef;
-      let otherRef;
-      ReactFabric.render(
-        <Component>
-          <Component
-            foo="bar"
-            ref={ref => {
-              viewRef = ref;
-            }}
-          />
-          <View
-            ref={ref => {
-              otherRef = ref;
-            }}
-          />
-        </Component>,
-        11,
-      );
-
-      const successCallback = jest.fn();
-      const failureCallback = jest.fn();
-
-      expect(() => {
-        viewRef.measureLayout(otherRef, successCallback, failureCallback);
-      }).toErrorDev(
-        [
-          'Warning: measureLayout on components using NativeMethodsMixin ' +
-            'or ReactNative.NativeComponent is not currently supported in Fabric. ' +
-            'measureLayout must be called on a native ref. Consider using forwardRef.',
-        ],
-        {
-          withoutStack: true,
+        function () {
+          b = this;
         },
+        true,
       );
-
-      expect(nativeFabricUIManager.measureLayout).not.toBeCalled();
-      expect(UIManager.measureLayout).not.toBeCalled();
     });
+
+    expect(a).toBeTruthy();
+    expect(a).toBe(b);
+    expect(c).toBe(null);
   });
 
-  it('returns the correct instance and calls it in the callback', () => {
+  // @gate !disableLegacyMode
+  it('returns the instance in legacy mode and calls the callback with it', () => {
     const View = createReactNativeComponentClass('RCTView', () => ({
       validAttributes: {foo: true},
       uiViewClassName: 'RCTView',
@@ -528,9 +445,14 @@ describe('ReactFabric', () => {
     let a;
     let b;
     const c = ReactFabric.render(
-      <View foo="foo" ref={v => (a = v)} />,
+      <View
+        foo="foo"
+        ref={v => {
+          a = v;
+        }}
+      />,
       11,
-      function() {
+      function () {
         b = this;
       },
     );
@@ -540,7 +462,7 @@ describe('ReactFabric', () => {
     expect(a).toBe(c);
   });
 
-  it('renders and reorders children', () => {
+  it('renders and reorders children', async () => {
     const View = createReactNativeComponentClass('RCTView', () => ({
       validAttributes: {title: true},
       uiViewClassName: 'RCTView',
@@ -550,7 +472,11 @@ describe('ReactFabric', () => {
       render() {
         const chars = this.props.chars.split('');
         return (
-          <View>{chars.map(text => <View key={text} title={text} />)}</View>
+          <View>
+            {chars.map(text => (
+              <View key={text} title={text} />
+            ))}
+          </View>
         );
       }
     }
@@ -559,18 +485,60 @@ describe('ReactFabric', () => {
     const before = 'abcdefghijklmnopqrst';
     const after = 'mxhpgwfralkeoivcstzy';
 
-    ReactFabric.render(<Component chars={before} />, 11);
-    expect(
-      nativeFabricUIManager.__dumpHierarchyForJestTestsOnly(),
-    ).toMatchSnapshot();
+    await act(() => {
+      ReactFabric.render(<Component chars={before} />, 11, null, true);
+    });
+    expect(nativeFabricUIManager.__dumpHierarchyForJestTestsOnly()).toBe(`11
+ RCTView null
+   RCTView {"title":"a"}
+   RCTView {"title":"b"}
+   RCTView {"title":"c"}
+   RCTView {"title":"d"}
+   RCTView {"title":"e"}
+   RCTView {"title":"f"}
+   RCTView {"title":"g"}
+   RCTView {"title":"h"}
+   RCTView {"title":"i"}
+   RCTView {"title":"j"}
+   RCTView {"title":"k"}
+   RCTView {"title":"l"}
+   RCTView {"title":"m"}
+   RCTView {"title":"n"}
+   RCTView {"title":"o"}
+   RCTView {"title":"p"}
+   RCTView {"title":"q"}
+   RCTView {"title":"r"}
+   RCTView {"title":"s"}
+   RCTView {"title":"t"}`);
 
-    ReactFabric.render(<Component chars={after} />, 11);
-    expect(
-      nativeFabricUIManager.__dumpHierarchyForJestTestsOnly(),
-    ).toMatchSnapshot();
+    await act(() => {
+      ReactFabric.render(<Component chars={after} />, 11, null, true);
+    });
+    expect(nativeFabricUIManager.__dumpHierarchyForJestTestsOnly()).toBe(`11
+ RCTView null
+   RCTView {"title":"m"}
+   RCTView {"title":"x"}
+   RCTView {"title":"h"}
+   RCTView {"title":"p"}
+   RCTView {"title":"g"}
+   RCTView {"title":"w"}
+   RCTView {"title":"f"}
+   RCTView {"title":"r"}
+   RCTView {"title":"a"}
+   RCTView {"title":"l"}
+   RCTView {"title":"k"}
+   RCTView {"title":"e"}
+   RCTView {"title":"o"}
+   RCTView {"title":"i"}
+   RCTView {"title":"v"}
+   RCTView {"title":"c"}
+   RCTView {"title":"s"}
+   RCTView {"title":"t"}
+   RCTView {"title":"z"}
+   RCTView {"title":"y"}`);
   });
 
-  it('recreates host parents even if only children changed', () => {
+  it('recreates host parents even if only children changed', async () => {
     const View = createReactNativeComponentClass('RCTView', () => ({
       validAttributes: {title: true},
       uiViewClassName: 'RCTView',
@@ -586,34 +554,86 @@ describe('ReactFabric', () => {
       render() {
         const chars = this.state.chars.split('');
         return (
-          <View>{chars.map(text => <View key={text} title={text} />)}</View>
+          <View>
+            {chars.map(text => (
+              <View key={text} title={text} />
+            ))}
+          </View>
         );
       }
     }
 
     const ref = React.createRef();
     // Wrap in a host node.
-    ReactFabric.render(
-      <View>
-        <Component ref={ref} />
-      </View>,
-      11,
+    await act(() => {
+      ReactFabric.render(
+        <View>
+          <Component ref={ref} />
+        </View>,
+        11,
+        null,
+        true,
+      );
+    });
+    expect(nativeFabricUIManager.__dumpHierarchyForJestTestsOnly()).toBe(
+      `11
+ RCTView null
+   RCTView null
+     RCTView {"title":"a"}
+     RCTView {"title":"b"}
+     RCTView {"title":"c"}
+     RCTView {"title":"d"}
+     RCTView {"title":"e"}
+     RCTView {"title":"f"}
+     RCTView {"title":"g"}
+     RCTView {"title":"h"}
+     RCTView {"title":"i"}
+     RCTView {"title":"j"}
+     RCTView {"title":"k"}
+     RCTView {"title":"l"}
+     RCTView {"title":"m"}
+     RCTView {"title":"n"}
+     RCTView {"title":"o"}
+     RCTView {"title":"p"}
+     RCTView {"title":"q"}
+     RCTView {"title":"r"}
+     RCTView {"title":"s"}
+     RCTView {"title":"t"}`,
     );
-    expect(
-      nativeFabricUIManager.__dumpHierarchyForJestTestsOnly(),
-    ).toMatchSnapshot();
 
     // Call setState() so that we skip over the top-level host node.
     // It should still get recreated despite a bailout.
-    ref.current.setState({
-      chars: after,
+    await act(() => {
+      ref.current.setState({
+        chars: after,
+      });
     });
-    expect(
-      nativeFabricUIManager.__dumpHierarchyForJestTestsOnly(),
-    ).toMatchSnapshot();
+    expect(nativeFabricUIManager.__dumpHierarchyForJestTestsOnly()).toBe(`11
+ RCTView null
+   RCTView null
+     RCTView {"title":"m"}
+     RCTView {"title":"x"}
+     RCTView {"title":"h"}
+     RCTView {"title":"p"}
+     RCTView {"title":"g"}
+     RCTView {"title":"w"}
+     RCTView {"title":"f"}
+     RCTView {"title":"r"}
+     RCTView {"title":"a"}
+     RCTView {"title":"l"}
+     RCTView {"title":"k"}
+     RCTView {"title":"e"}
+     RCTView {"title":"o"}
+     RCTView {"title":"i"}
+     RCTView {"title":"v"}
+     RCTView {"title":"c"}
+     RCTView {"title":"s"}
+     RCTView {"title":"t"}
+     RCTView {"title":"z"}
+     RCTView {"title":"y"}`);
   });
 
-  it('calls setState with no arguments', () => {
+  it('calls setState with no arguments', async () => {
     let mockArgs;
     class Component extends React.Component {
       componentDidMount() {
@@ -624,36 +644,44 @@ describe('ReactFabric', () => {
       }
     }
 
-    ReactFabric.render(<Component />, 11);
+    await act(() => {
+      ReactFabric.render(<Component />, 11, null, true);
+    });
     expect(mockArgs.length).toEqual(0);
   });
 
-  it('should call complete after inserting children', () => {
+  it('should call complete after inserting children', async () => {
     const View = createReactNativeComponentClass('RCTView', () => ({
       validAttributes: {foo: true},
       uiViewClassName: 'RCTView',
     }));
 
     const snapshots = [];
-    nativeFabricUIManager.completeRoot.mockImplementation(function(
-      rootTag,
-      newChildSet,
-    ) {
-      snapshots.push(
-        nativeFabricUIManager.__dumpChildSetForJestTestsOnly(newChildSet),
+    nativeFabricUIManager.completeRoot.mockImplementation(
+      function (rootTag, newChildSet) {
+        snapshots.push(
+          nativeFabricUIManager.__dumpChildSetForJestTestsOnly(newChildSet),
+        );
+      },
+    );
+
+    await act(() => {
+      ReactFabric.render(
+        <View foo="a">
+          <View foo="b" />
+        </View>,
+        22,
+        null,
+        true,
       );
     });
-
-    ReactFabric.render(
-      <View foo="a">
-        <View foo="b" />
-      </View>,
-      22,
-    );
-    expect(snapshots).toMatchSnapshot();
+    expect(snapshots).toEqual([
+      `RCTView {"foo":"a"}
+  RCTView {"foo":"b"}`,
+    ]);
   });
 
-  it('should not throw when <View> is used inside of a <Text> ancestor', () => {
+  it('should not throw when <View> is used inside of a <Text> ancestor', async () => {
     const Image = createReactNativeComponentClass('RCTImage', () => ({
       validAttributes: {},
       uiViewClassName: 'RCTImage',
@@ -667,22 +695,30 @@ describe('ReactFabric', () => {
       uiViewClassName: 'RCTView',
     }));
 
-    ReactFabric.render(
-      <Text>
-        <View />
-      </Text>,
-      11,
-    );
+    await act(() => {
+      ReactFabric.render(
+        <Text>
+          <View />
+        </Text>,
+        11,
+        null,
+        true,
+      );
+    });
 
-    ReactFabric.render(
-      <Text>
-        <Image />
-      </Text>,
-      11,
-    );
+    await act(() => {
+      ReactFabric.render(
+        <Text>
+          <Image />
+        </Text>,
+        11,
+        null,
+        true,
+      );
+    });
   });
 
-  it('should throw for text not inside of a <Text> ancestor', () => {
+  it('should console error for text not inside of a <Text> ancestor', async () => {
     const ScrollView = createReactNativeComponentClass('RCTScrollView', () => ({
       validAttributes: {},
       uiViewClassName: 'RCTScrollView',
@@ -696,21 +732,27 @@ describe('ReactFabric', () => {
       uiViewClassName: 'RCTView',
     }));
 
-    expect(() => ReactFabric.render(<View>this should warn</View>, 11)).toThrow(
-      'Text strings must be rendered within a <Text> component.',
-    );
+    await expect(async () => {
+      await act(() => {
+        ReactFabric.render(<View>this should warn</View>, 11, null, true);
+      });
+    }).toErrorDev(['Text strings must be rendered within a <Text> component.']);
 
-    expect(() =>
-      ReactFabric.render(
-        <Text>
-          <ScrollView>hi hello hi</ScrollView>
-        </Text>,
-        11,
-      ),
-    ).toThrow('Text strings must be rendered within a <Text> component.');
+    await expect(async () => {
+      await act(() => {
+        ReactFabric.render(
+          <Text>
+            <ScrollView>hi hello hi</ScrollView>
+          </Text>,
+          11,
+          null,
+          true,
+        );
+      });
+    }).toErrorDev(['Text strings must be rendered within a <Text> component.']);
   });
 
-  it('should not throw for text inside of an indirect <Text> ancestor', () => {
+  it('should not throw for text inside of an indirect <Text> ancestor', async () => {
     const Text = createReactNativeComponentClass('RCTText', () => ({
       validAttributes: {},
       uiViewClassName: 'RCTText',
@@ -718,15 +760,19 @@ describe('ReactFabric', () => {
 
     const Indirection = () => 'Hi';
 
-    ReactFabric.render(
-      <Text>
-        <Indirection />
-      </Text>,
-      11,
-    );
+    await act(() => {
+      ReactFabric.render(
+        <Text>
+          <Indirection />
+        </Text>,
+        11,
+        null,
+        true,
+      );
+    });
   });
 
-  it('dispatches events to the last committed props', () => {
+  it('dispatches events to the last committed props', async () => {
     const View = createReactNativeComponentClass('RCTView', () => ({
       validAttributes: {},
       uiViewClassName: 'RCTView',
@@ -740,25 +786,21 @@ describe('ReactFabric', () => {
     const touchStart = jest.fn();
     const touchStart2 = jest.fn();
 
-    ReactFabric.render(<View onTouchStart={touchStart} />, 11);
+    await act(() => {
+      ReactFabric.render(<View onTouchStart={touchStart} />, 11, null, true);
+    });
 
     expect(nativeFabricUIManager.createNode.mock.calls.length).toBe(1);
     expect(nativeFabricUIManager.registerEventHandler.mock.calls.length).toBe(
       1,
     );
 
-    let [
-      ,
-      ,
-      ,
-      ,
-      instanceHandle,
-    ] = nativeFabricUIManager.createNode.mock.calls[0];
-    let [
-      dispatchEvent,
-    ] = nativeFabricUIManager.registerEventHandler.mock.calls[0];
+    const [, , , , instanceHandle] =
+      nativeFabricUIManager.createNode.mock.calls[0];
+    const [dispatchEvent] =
+      nativeFabricUIManager.registerEventHandler.mock.calls[0];
 
-    let touchEvent = {
+    const touchEvent = {
       touches: [],
       changedTouches: [],
     };
@@ -770,7 +812,9 @@ describe('ReactFabric', () => {
     expect(touchStart).toBeCalled();
     expect(touchStart2).not.toBeCalled();
 
-    ReactFabric.render(<View onTouchStart={touchStart2} />, 11);
+    await act(() => {
+      ReactFabric.render(<View onTouchStart={touchStart2} />, 11, null, true);
+    });
 
     // Intentionally dispatch to the same instanceHandle again.
     dispatchEvent(instanceHandle, 'topTouchStart', touchEvent);
@@ -781,9 +825,103 @@ describe('ReactFabric', () => {
     expect(touchStart2).toBeCalled();
   });
 
-  it('dispatches event with target as reactTag', () => {
-    ReactFeatureFlags.enableNativeTargetAsInstance = false;
+  describe('skipBubbling', () => {
+    it('should skip bubbling to ancestor if specified', async () => {
+      const View = createReactNativeComponentClass('RCTView', () => ({
+        validAttributes: {},
+        uiViewClassName: 'RCTView',
+        bubblingEventTypes: {
+          topDefaultBubblingEvent: {
+            phasedRegistrationNames: {
+              captured: 'onDefaultBubblingEventCapture',
+              bubbled: 'onDefaultBubblingEvent',
+            },
+          },
+          topBubblingEvent: {
+            phasedRegistrationNames: {
+              captured: 'onBubblingEventCapture',
+              bubbled: 'onBubblingEvent',
+              skipBubbling: false,
+            },
+          },
+          topSkipBubblingEvent: {
+            phasedRegistrationNames: {
+              captured: 'onSkippedBubblingEventCapture',
+              bubbled: 'onSkippedBubblingEvent',
+              skipBubbling: true,
+            },
+          },
+        },
+      }));
+      const ancestorBubble = jest.fn();
+      const ancestorCapture = jest.fn();
+      const targetBubble = jest.fn();
+      const targetCapture = jest.fn();
 
+      const event = {};
+
+      await act(() => {
+        ReactFabric.render(
+          <View
+            onSkippedBubblingEventCapture={ancestorCapture}
+            onDefaultBubblingEventCapture={ancestorCapture}
+            onBubblingEventCapture={ancestorCapture}
+            onSkippedBubblingEvent={ancestorBubble}
+            onDefaultBubblingEvent={ancestorBubble}
+            onBubblingEvent={ancestorBubble}>
+            <View
+              onSkippedBubblingEventCapture={targetCapture}
+              onDefaultBubblingEventCapture={targetCapture}
+              onBubblingEventCapture={targetCapture}
+              onSkippedBubblingEvent={targetBubble}
+              onDefaultBubblingEvent={targetBubble}
+              onBubblingEvent={targetBubble}
+            />
+          </View>,
+          11,
+          null,
+          true,
+        );
+      });
+
+      expect(nativeFabricUIManager.createNode.mock.calls.length).toBe(2);
+      expect(nativeFabricUIManager.registerEventHandler.mock.calls.length).toBe(
+        1,
+      );
+      const [, , , , childInstance] =
+        nativeFabricUIManager.createNode.mock.calls[0];
+      const [dispatchEvent] =
+        nativeFabricUIManager.registerEventHandler.mock.calls[0];
+
+      dispatchEvent(childInstance, 'topDefaultBubblingEvent', event);
+      expect(targetBubble).toHaveBeenCalledTimes(1);
+      expect(targetCapture).toHaveBeenCalledTimes(1);
+      expect(ancestorCapture).toHaveBeenCalledTimes(1);
+      expect(ancestorBubble).toHaveBeenCalledTimes(1);
+      ancestorBubble.mockReset();
+      ancestorCapture.mockReset();
+      targetBubble.mockReset();
+      targetCapture.mockReset();
+
+      dispatchEvent(childInstance, 'topBubblingEvent', event);
+      expect(targetBubble).toHaveBeenCalledTimes(1);
+      expect(targetCapture).toHaveBeenCalledTimes(1);
+      expect(ancestorCapture).toHaveBeenCalledTimes(1);
+      expect(ancestorBubble).toHaveBeenCalledTimes(1);
+      ancestorBubble.mockReset();
+      ancestorCapture.mockReset();
+      targetBubble.mockReset();
+      targetCapture.mockReset();
+
+      dispatchEvent(childInstance, 'topSkipBubblingEvent', event);
+      expect(targetBubble).toHaveBeenCalledTimes(1);
+      expect(targetCapture).toHaveBeenCalledTimes(1);
+      expect(ancestorCapture).toHaveBeenCalledTimes(1);
+      expect(ancestorBubble).not.toBeCalled();
+    });
+  });
+
+  it('dispatches event with target as instance', async () => {
     const View = createReactNativeComponentClass('RCTView', () => ({
       validAttributes: {
         id: true,
@@ -800,15 +938,10 @@ describe('ReactFabric', () => {
     }));
 
     function getViewById(id) {
-      const [
-        reactTag,
-        ,
-        ,
-        ,
-        instanceHandle,
-      ] = nativeFabricUIManager.createNode.mock.calls.find(
-        args => args[3] && args[3].id === id,
-      );
+      const [reactTag, , , , instanceHandle] =
+        nativeFabricUIManager.createNode.mock.calls.find(
+          args => args[3] && args[3].id === id,
+        );
 
       return {reactTag, instanceHandle};
     }
@@ -816,43 +949,40 @@ describe('ReactFabric', () => {
     const ref1 = React.createRef();
     const ref2 = React.createRef();
 
-    ReactFabric.render(
-      <View id="parent">
-        <View
-          ref={ref1}
-          id="one"
-          onResponderStart={event => {
-            expect(ref1.current).not.toBeNull();
-            expect(ReactFabric.findNodeHandle(ref1.current)).toEqual(
-              event.target,
-            );
-            expect(ReactFabric.findNodeHandle(ref1.current)).toEqual(
-              event.currentTarget,
-            );
-          }}
-          onStartShouldSetResponder={() => true}
-        />
-        <View
-          ref={ref2}
-          id="two"
-          onResponderStart={event => {
-            expect(ref2.current).not.toBeNull();
-            expect(ReactFabric.findNodeHandle(ref2.current)).toEqual(
-              event.target,
-            );
-            expect(ReactFabric.findNodeHandle(ref2.current)).toEqual(
-              event.currentTarget,
-            );
-          }}
-          onStartShouldSetResponder={() => true}
-        />
-      </View>,
-      1,
-    );
+    await act(() => {
+      ReactFabric.render(
+        <View id="parent">
+          <View
+            ref={ref1}
+            id="one"
+            onResponderStart={event => {
+              expect(ref1.current).not.toBeNull();
+              // Check for referential equality
+              expect(ref1.current).toBe(event.target);
+              expect(ref1.current).toBe(event.currentTarget);
+            }}
+            onStartShouldSetResponder={() => true}
+          />
+          <View
+            ref={ref2}
+            id="two"
+            onResponderStart={event => {
+              expect(ref2.current).not.toBeNull();
+              // Check for referential equality
+              expect(ref2.current).toBe(event.target);
+              expect(ref2.current).toBe(event.currentTarget);
+            }}
+            onStartShouldSetResponder={() => true}
+          />
+        </View>,
+        1,
+        null,
+        true,
+      );
+    });
 
-    let [
-      dispatchEvent,
-    ] = nativeFabricUIManager.registerEventHandler.mock.calls[0];
+    const [dispatchEvent] =
+      nativeFabricUIManager.registerEventHandler.mock.calls[0];
 
     dispatchEvent(getViewById('one').instanceHandle, 'topTouchStart', {
       target: getViewById('one').reactTag,
@@ -884,104 +1014,7 @@ describe('ReactFabric', () => {
     expect.assertions(6);
   });
 
-  it('dispatches event with target as instance', () => {
-    ReactFeatureFlags.enableNativeTargetAsInstance = true;
-
-    const View = createReactNativeComponentClass('RCTView', () => ({
-      validAttributes: {
-        id: true,
-      },
-      uiViewClassName: 'RCTView',
-      directEventTypes: {
-        topTouchStart: {
-          registrationName: 'onTouchStart',
-        },
-        topTouchEnd: {
-          registrationName: 'onTouchEnd',
-        },
-      },
-    }));
-
-    function getViewById(id) {
-      const [
-        reactTag,
-        ,
-        ,
-        ,
-        instanceHandle,
-      ] = nativeFabricUIManager.createNode.mock.calls.find(
-        args => args[3] && args[3].id === id,
-      );
-
-      return {reactTag, instanceHandle};
-    }
-
-    const ref1 = React.createRef();
-    const ref2 = React.createRef();
-
-    ReactFabric.render(
-      <View id="parent">
-        <View
-          ref={ref1}
-          id="one"
-          onResponderStart={event => {
-            expect(ref1.current).not.toBeNull();
-            // Check for referential equality
-            expect(ref1.current).toBe(event.target);
-            expect(ref1.current).toBe(event.currentTarget);
-          }}
-          onStartShouldSetResponder={() => true}
-        />
-        <View
-          ref={ref2}
-          id="two"
-          onResponderStart={event => {
-            expect(ref2.current).not.toBeNull();
-            // Check for referential equality
-            expect(ref2.current).toBe(event.target);
-            expect(ref2.current).toBe(event.currentTarget);
-          }}
-          onStartShouldSetResponder={() => true}
-        />
-      </View>,
-      1,
-    );
-
-    let [
-      dispatchEvent,
-    ] = nativeFabricUIManager.registerEventHandler.mock.calls[0];
-
-    dispatchEvent(getViewById('one').instanceHandle, 'topTouchStart', {
-      target: getViewById('one').reactTag,
-      identifier: 17,
-      touches: [],
-      changedTouches: [],
-    });
-    dispatchEvent(getViewById('one').instanceHandle, 'topTouchEnd', {
-      target: getViewById('one').reactTag,
-      identifier: 17,
-      touches: [],
-      changedTouches: [],
-    });
-
-    dispatchEvent(getViewById('two').instanceHandle, 'topTouchStart', {
-      target: getViewById('two').reactTag,
-      identifier: 17,
-      touches: [],
-      changedTouches: [],
-    });
-
-    dispatchEvent(getViewById('two').instanceHandle, 'topTouchEnd', {
-      target: getViewById('two').reactTag,
-      identifier: 17,
-      touches: [],
-      changedTouches: [],
-    });
-
-    expect.assertions(6);
-  });
-
-  it('findHostInstance_DEPRECATED should warn if used to find a host component inside StrictMode', () => {
+  it('findHostInstance_DEPRECATED should warn if used to find a host component inside StrictMode', async () => {
     const View = createReactNativeComponentClass('RCTView', () => ({
       validAttributes: {foo: true},
       uiViewClassName: 'RCTView',
@@ -1000,25 +1033,31 @@ describe('ReactFabric', () => {
       }
     }
 
-    ReactFabric.render(<ContainsStrictModeChild ref={n => (parent = n)} />, 11);
+    await act(() => {
+      ReactFabric.render(
+        <ContainsStrictModeChild ref={n => (parent = n)} />,
+        11,
+        null,
+        true,
+      );
+    });
 
     let match;
     expect(
       () => (match = ReactFabric.findHostInstance_DEPRECATED(parent)),
     ).toErrorDev([
-      'Warning: findHostInstance_DEPRECATED is deprecated in StrictMode. ' +
+      'findHostInstance_DEPRECATED is deprecated in StrictMode. ' +
         'findHostInstance_DEPRECATED was passed an instance of ContainsStrictModeChild which renders StrictMode children. ' +
         'Instead, add a ref directly to the element you want to reference. ' +
         'Learn more about using refs safely here: ' +
-        'https://fb.me/react-strict-mode-find-node' +
+        'https://react.dev/link/strict-mode-find-node' +
         '\n    in RCTView (at **)' +
-        '\n    in StrictMode (at **)' +
         '\n    in ContainsStrictModeChild (at **)',
     ]);
     expect(match).toBe(child);
   });
 
-  it('findHostInstance_DEPRECATED should warn if passed a component that is inside StrictMode', () => {
+  it('findHostInstance_DEPRECATED should warn if passed a component that is inside StrictMode', async () => {
     const View = createReactNativeComponentClass('RCTView', () => ({
       validAttributes: {foo: true},
       uiViewClassName: 'RCTView',
@@ -1033,30 +1072,33 @@ describe('ReactFabric', () => {
       }
     }
 
-    ReactFabric.render(
-      <StrictMode>
-        <IsInStrictMode ref={n => (parent = n)} />
-      </StrictMode>,
-      11,
-    );
+    await act(() => {
+      ReactFabric.render(
+        <StrictMode>
+          <IsInStrictMode ref={n => (parent = n)} />
+        </StrictMode>,
+        11,
+        null,
+        true,
+      );
+    });
 
     let match;
     expect(
       () => (match = ReactFabric.findHostInstance_DEPRECATED(parent)),
     ).toErrorDev([
-      'Warning: findHostInstance_DEPRECATED is deprecated in StrictMode. ' +
+      'findHostInstance_DEPRECATED is deprecated in StrictMode. ' +
         'findHostInstance_DEPRECATED was passed an instance of IsInStrictMode which is inside StrictMode. ' +
         'Instead, add a ref directly to the element you want to reference. ' +
         'Learn more about using refs safely here: ' +
-        'https://fb.me/react-strict-mode-find-node' +
+        'https://react.dev/link/strict-mode-find-node' +
         '\n    in RCTView (at **)' +
-        '\n    in IsInStrictMode (at **)' +
-        '\n    in StrictMode (at **)',
+        '\n    in IsInStrictMode (at **)',
     ]);
     expect(match).toBe(child);
   });
 
-  it('findNodeHandle should warn if used to find a host component inside StrictMode', () => {
+  it('findNodeHandle should warn if used to find a host component inside StrictMode', async () => {
     const View = createReactNativeComponentClass('RCTView', () => ({
       validAttributes: {foo: true},
       uiViewClassName: 'RCTView',
@@ -1075,23 +1117,31 @@ describe('ReactFabric', () => {
       }
     }
 
-    ReactFabric.render(<ContainsStrictModeChild ref={n => (parent = n)} />, 11);
+    await act(() => {
+      ReactFabric.render(
+        <ContainsStrictModeChild ref={n => (parent = n)} />,
+        11,
+        null,
+        true,
+      );
+    });
 
     let match;
     expect(() => (match = ReactFabric.findNodeHandle(parent))).toErrorDev([
-      'Warning: findNodeHandle is deprecated in StrictMode. ' +
+      'findNodeHandle is deprecated in StrictMode. ' +
         'findNodeHandle was passed an instance of ContainsStrictModeChild which renders StrictMode children. ' +
         'Instead, add a ref directly to the element you want to reference. ' +
         'Learn more about using refs safely here: ' +
-        'https://fb.me/react-strict-mode-find-node' +
+        'https://react.dev/link/strict-mode-find-node' +
         '\n    in RCTView (at **)' +
-        '\n    in StrictMode (at **)' +
         '\n    in ContainsStrictModeChild (at **)',
     ]);
-    expect(match).toBe(child._nativeTag);
+    expect(match).toBe(
+      ReactNativePrivateInterface.getNativeTagFromPublicInstance(child),
+    );
   });
 
-  it('findNodeHandle should warn if passed a component that is inside StrictMode', () => {
+  it('findNodeHandle should warn if passed a component that is inside StrictMode', async () => {
     const View = createReactNativeComponentClass('RCTView', () => ({
       validAttributes: {foo: true},
       uiViewClassName: 'RCTView',
@@ -1106,24 +1156,181 @@ describe('ReactFabric', () => {
       }
     }
 
-    ReactFabric.render(
-      <StrictMode>
-        <IsInStrictMode ref={n => (parent = n)} />
-      </StrictMode>,
-      11,
-    );
+    await act(() => {
+      ReactFabric.render(
+        <StrictMode>
+          <IsInStrictMode ref={n => (parent = n)} />
+        </StrictMode>,
+        11,
+        null,
+        true,
+      );
+    });
 
     let match;
     expect(() => (match = ReactFabric.findNodeHandle(parent))).toErrorDev([
-      'Warning: findNodeHandle is deprecated in StrictMode. ' +
+      'findNodeHandle is deprecated in StrictMode. ' +
         'findNodeHandle was passed an instance of IsInStrictMode which is inside StrictMode. ' +
         'Instead, add a ref directly to the element you want to reference. ' +
         'Learn more about using refs safely here: ' +
-        'https://fb.me/react-strict-mode-find-node' +
+        'https://react.dev/link/strict-mode-find-node' +
         '\n    in RCTView (at **)' +
-        '\n    in IsInStrictMode (at **)' +
-        '\n    in StrictMode (at **)',
+        '\n    in IsInStrictMode (at **)',
     ]);
-    expect(match).toBe(child._nativeTag);
+    expect(match).toBe(
+      ReactNativePrivateInterface.getNativeTagFromPublicInstance(child),
+    );
+  });
+
+  it('should no-op if calling sendAccessibilityEvent on unmounted refs', async () => {
+    const View = createReactNativeComponentClass('RCTView', () => ({
+      validAttributes: {foo: true},
+      uiViewClassName: 'RCTView',
+    }));
+
+    nativeFabricUIManager.sendAccessibilityEvent.mockReset();
+
+    let viewRef;
+    await act(() => {
+      ReactFabric.render(
+        <View
+          ref={ref => {
+            viewRef = ref;
+          }}
+        />,
+        11,
+        null,
+        true,
+      );
+    });
+    const dangerouslyRetainedViewRef = viewRef;
+    await act(() => {
+      ReactFabric.stopSurface(11);
+    });
+
+    ReactFabric.sendAccessibilityEvent(
+      dangerouslyRetainedViewRef,
+      'eventTypeName',
+    );
+
+    expect(nativeFabricUIManager.sendAccessibilityEvent).not.toBeCalled();
+  });
+
+  it('getNodeFromInternalInstanceHandle should return the correct shadow node', async () => {
+    const View = createReactNativeComponentClass('RCTView', () => ({
+      validAttributes: {foo: true},
+      uiViewClassName: 'RCTView',
+    }));
+
+    await act(() => {
+      ReactFabric.render(<View foo="test" />, 1, null, true);
+    });
+
+    const internalInstanceHandle =
+      nativeFabricUIManager.createNode.mock.calls[0][4];
+    expect(internalInstanceHandle).toEqual(expect.any(Object));
+
+    const expectedShadowNode =
+      nativeFabricUIManager.createNode.mock.results[0].value;
+    expect(expectedShadowNode).toEqual(expect.any(Object));
+
+    const node = ReactFabric.getNodeFromInternalInstanceHandle(
+      internalInstanceHandle,
+    );
+    expect(node).toBe(expectedShadowNode);
+  });
+
+  it('getPublicInstanceFromInternalInstanceHandle should provide public instances for HostComponent', async () => {
+    const View = createReactNativeComponentClass('RCTView', () => ({
+      validAttributes: {foo: true},
+      uiViewClassName: 'RCTView',
+    }));
+
+    let viewRef;
+    await act(() => {
+      ReactFabric.render(
+        <View
+          foo="test"
+          ref={ref => {
+            viewRef = ref;
+          }}
+        />,
+        1,
+        null,
+        true,
+      );
+    });
+
+    const internalInstanceHandle =
+      nativeFabricUIManager.createNode.mock.calls[0][4];
+    expect(internalInstanceHandle).toEqual(expect.any(Object));
+
+    const publicInstance =
+      ReactFabric.getPublicInstanceFromInternalInstanceHandle(
+        internalInstanceHandle,
+      );
+    expect(publicInstance).toBe(viewRef);
+
+    await act(() => {
+      ReactFabric.render(null, 1, null, true);
+    });
+
+    const publicInstanceAfterUnmount =
+      ReactFabric.getPublicInstanceFromInternalInstanceHandle(
+        internalInstanceHandle,
+      );
+    expect(publicInstanceAfterUnmount).toBe(null);
+  });
+
+  it('getPublicInstanceFromInternalInstanceHandle should provide public instances for HostText', async () => {
+    jest.spyOn(ReactNativePrivateInterface, 'createPublicTextInstance');
+
+    const RCTText = createReactNativeComponentClass('RCTText', () => ({
+      validAttributes: {},
+      uiViewClassName: 'RCTText',
+    }));
+
+    await act(() => {
+      ReactFabric.render(<RCTText>Text content</RCTText>, 1, null, true);
+    });
+
+    // Access the internal instance handle used to create the text node.
+    const internalInstanceHandle =
+      nativeFabricUIManager.createNode.mock.calls[0][4];
+    expect(internalInstanceHandle).toEqual(expect.any(Object));
+
+    // Text public instances should be created lazily.
+    expect(
+      ReactNativePrivateInterface.createPublicTextInstance,
+    ).not.toHaveBeenCalled();
+
+    const publicInstance =
+      ReactFabric.getPublicInstanceFromInternalInstanceHandle(
+        internalInstanceHandle,
+      );
+
+    // We just requested the text public instance, so it should have been created at this point.
+    expect(
+      ReactNativePrivateInterface.createPublicTextInstance,
+    ).toHaveBeenCalledTimes(1);
+    expect(
+      ReactNativePrivateInterface.createPublicTextInstance,
+    ).toHaveBeenCalledWith(internalInstanceHandle);
+
+    const expectedPublicInstance =
+      ReactNativePrivateInterface.createPublicTextInstance.mock.results[0]
+        .value;
+    expect(publicInstance).toBe(expectedPublicInstance);
+
+    await act(() => {
+      ReactFabric.render(null, 1, null, true);
+    });
+
+    const publicInstanceAfterUnmount =
+      ReactFabric.getPublicInstanceFromInternalInstanceHandle(
+        internalInstanceHandle,
+      );
+
+    expect(publicInstanceAfterUnmount).toBe(null);
   });
 });

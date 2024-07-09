@@ -1,5 +1,5 @@
 /**
- * Copyright (c) Facebook, Inc. and its affiliates.
+ * Copyright (c) Meta Platforms, Inc. and affiliates.
  *
  * This source code is licensed under the MIT license found in the
  * LICENSE file in the root directory of this source tree.
@@ -7,16 +7,23 @@
  * @flow
  */
 
-import type {LazyComponent} from 'shared/ReactLazyComponent';
+import assign from 'shared/assign';
+import {disableDefaultPropsExceptForClasses} from 'shared/ReactFeatureFlags';
 
-import {Resolved, initializeLazyComponentType} from 'shared/ReactLazyComponent';
-
-export function resolveDefaultProps(Component: any, baseProps: Object): Object {
+export function resolveDefaultPropsOnNonClassComponent(
+  Component: any,
+  baseProps: Object,
+): Object {
+  if (disableDefaultPropsExceptForClasses) {
+    // Support for defaultProps is removed in React 19 for all types
+    // except classes.
+    return baseProps;
+  }
   if (Component && Component.defaultProps) {
     // Resolve default props. Taken from ReactElement
-    const props = Object.assign({}, baseProps);
+    const props = assign({}, baseProps);
     const defaultProps = Component.defaultProps;
-    for (let propName in defaultProps) {
+    for (const propName in defaultProps) {
       if (props[propName] === undefined) {
         props[propName] = defaultProps[propName];
       }
@@ -24,12 +31,4 @@ export function resolveDefaultProps(Component: any, baseProps: Object): Object {
     return props;
   }
   return baseProps;
-}
-
-export function readLazyComponentType<T>(lazyComponent: LazyComponent<T>): T {
-  initializeLazyComponentType(lazyComponent);
-  if (lazyComponent._status !== Resolved) {
-    throw lazyComponent._result;
-  }
-  return lazyComponent._result;
 }

@@ -1,5 +1,5 @@
 /**
- * Copyright (c) Facebook, Inc. and its affiliates.
+ * Copyright (c) Meta Platforms, Inc. and affiliates.
  *
  * This source code is licensed under the MIT license found in the
  * LICENSE file in the root directory of this source tree.
@@ -7,45 +7,91 @@
  * @flow
  */
 
-import invariant from 'shared/invariant';
-
 import typeof * as FeatureFlagsType from 'shared/ReactFeatureFlags';
-import typeof * as PersistentFeatureFlagsType from './ReactFeatureFlags.persistent';
+import typeof * as ExportsType from './ReactFeatureFlags.test-renderer.www';
 
 export const debugRenderPhaseSideEffectsForStrictMode = false;
-export const enableUserTimingAPI = __DEV__;
-export const warnAboutDeprecatedLifecycles = true;
-export const replayFailedUnitOfWorkWithInvokeGuardedCallback = false;
+export const enableDebugTracing = false;
+export const enableAsyncDebugInfo = false;
+export const enableSchedulingProfiler = false;
 export const enableProfilerTimer = __PROFILE__;
-export const enableSchedulerTracing = __PROFILE__;
-export const enableSuspenseServerRenderer = false;
-export const enableSelectiveHydration = false;
-export const enableChunksAPI = false;
-export const exposeConcurrentModeAPIs = __EXPERIMENTAL__;
-export const enableSchedulerDebugging = false;
-export const disableJavaScriptURLs = false;
-export const enableDeprecatedFlareAPI = true;
-export const enableFundamentalAPI = false;
+export const enableProfilerCommitHooks = __PROFILE__;
+export const enableProfilerNestedUpdatePhase = __PROFILE__;
+export const enableUpdaterTracking = false;
+export const enableCache = true;
+export const enableLegacyCache = true;
+export const enableBinaryFlight = true;
+export const enableFlightReadableStream = true;
+export const enableAsyncIterableChildren = false;
+export const enableTaint = true;
+export const enablePostpone = false;
+export const disableCommentsAsDOMContainers = true;
+export const disableInputAttributeSyncing = false;
+export const disableIEWorkarounds = true;
 export const enableScopeAPI = true;
-export const enableJSXTransformAPI = true;
-export const warnAboutUnmockedScheduler = true;
-export const flushSuspenseFallbacksInTests = true;
+export const enableCreateEventHandleAPI = false;
 export const enableSuspenseCallback = true;
-export const warnAboutDefaultPropsOnFunctionComponents = false;
-export const warnAboutStringRefs = false;
 export const disableLegacyContext = false;
-export const disableSchedulerTimeoutBasedOnReactExpirationTime = false;
-export const enableTrainModelFix = false;
 export const enableTrustedTypesIntegration = false;
-export const enableNativeTargetAsInstance = false;
+export const disableTextareaChildren = false;
+export const enableSuspenseAvoidThisFallback = true;
+export const enableSuspenseAvoidThisFallbackFizz = false;
+export const enableCPUSuspense = false;
+export const enableUseMemoCacheHook = true;
+export const enableNoCloningMemoCache = false;
+export const enableUseEffectEventHook = false;
+export const favorSafetyOverHydrationPerf = true;
+export const enableComponentStackLocations = true;
+export const enableLegacyFBSupport = false;
+export const enableFilterEmptyStringAttributesDOM = true;
+export const enableGetInspectorDataForInstanceInProduction = false;
+export const enableRenderableContext = false;
 
-// Only used in www builds.
-export function addUserTimingListener() {
-  invariant(false, 'Not implemented.');
-}
+export const enableRetryLaneExpiration = false;
+export const retryLaneExpirationMs = 5000;
+export const syncLaneExpirationMs = 250;
+export const transitionLaneExpirationMs = 5000;
+
+export const disableSchedulerTimeoutInWorkLoop = false;
+export const enableLazyContextPropagation = false;
+export const enableLegacyHidden = false;
+export const forceConcurrentByDefaultForTesting = false;
+export const allowConcurrentByDefault = true;
+
+export const consoleManagedByDevToolsDuringStrictMode = false;
+
+export const enableTransitionTracing = false;
+
+export const useModernStrictMode = false;
+export const enableDO_NOT_USE_disableStrictPassiveEffect = false;
+export const enableFizzExternalRuntime = false;
+export const enableDeferRootSchedulingToMicrotask = true;
+
+export const enableAsyncActions = true;
+
+export const alwaysThrottleRetries = true;
+
+export const passChildrenWhenCloningPersistedNodes = false;
+export const enableUseDeferredValueInitialArg = true;
+export const disableClientCache = true;
+
+export const enableServerComponentLogs = true;
+export const enableInfiniteRenderLoopDetection = false;
+
+export const enableRefAsProp = true;
+export const disableStringRefs = false;
+export const enableFastJSX = false;
+
+export const enableReactTestRendererWarning = false;
+export const disableLegacyMode = true;
+
+export const disableDefaultPropsExceptForClasses = false;
+export const enableAddPropertiesFastPath = false;
+
+export const renameElementSymbol = false;
+
+export const enableOwnerStacks = false;
+export const enableShallowPropDiffing = false;
 
 // Flow magic to verify the exports of this file match the original version.
-// eslint-disable-next-line no-unused-vars
-type Check<_X, Y: _X, X: Y = _X> = null;
-// eslint-disable-next-line no-unused-expressions
-(null: Check<PersistentFeatureFlagsType, FeatureFlagsType>);
+((((null: any): ExportsType): FeatureFlagsType): ExportsType);

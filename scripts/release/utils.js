@@ -3,27 +3,35 @@
 const {exec} = require('child-process-promise');
 const {createPatch} = require('diff');
 const {hashElement} = require('folder-hash');
-const {readdirSync, readFileSync, statSync, writeFileSync} = require('fs');
+const {existsSync, readFileSync, writeFileSync} = require('fs');
 const {readJson, writeJson} = require('fs-extra');
-const http = require('request-promise-json');
+const fetch = require('node-fetch');
 const logUpdate = require('log-update');
 const {join} = require('path');
 const createLogger = require('progress-estimator');
 const prompt = require('prompt-promise');
 const theme = require('./theme');
-
-// The following packages are published to NPM but not by this script.
-// They are released through a separate process.
-const RELEASE_SCRIPT_PACKAGE_SKIPLIST = [
-  'react-devtools',
-  'react-devtools-core',
-  'react-devtools-inline',
-];
+const {stablePackages, experimentalPackages} = require('../../ReactVersions');
 
 // https://www.npmjs.com/package/progress-estimator#configuration
 const logger = createLogger({
   storagePath: join(__dirname, '.progress-estimator'),
 });
+
+const addDefaultParamValue = (optionalShortName, longName, defaultValue) => {
+  let found = false;
+  for (let i = 0; i < process.argv.length; i++) {
+    const current = process.argv[i];
+    if (current === optionalShortName || current.startsWith(`${longName}=`)) {
+      found = true;
+      break;
+    }
+  }
+
+  if (!found) {
+    process.argv.push(`${longName}=${defaultValue}`);
+  }
+};
 
 const confirm = async message => {
   const confirmation = await prompt(theme`\n{caution ${message}} (y/N) `);
@@ -40,43 +48,25 @@ const execRead = async (command, options) => {
   return stdout.trim();
 };
 
+const extractCommitFromVersionNumber = version => {
+  // Support stable version format e.g. "0.0.0-0e526bcec-20210202"
+  // and experimental version format e.g. "0.0.0-experimental-0e526bcec-20210202"
+  const match = version.match(/0\.0\.0\-([a-z]+\-){0,1}([^-]+).+/);
+  if (match === null) {
+    throw Error(`Could not extra commit from version "${version}"`);
+  }
+  return match[2];
+};
+
 const getArtifactsList = async buildID => {
-  const buildMetadataURL = `https://circleci.com/api/v1.1/project/github/facebook/react/${buildID}?circle-token=${
-    process.env.CIRCLE_CI_API_TOKEN
-  }`;
-  const buildMetadata = await http.get(buildMetadataURL, true);
-  if (!buildMetadata.workflows || !buildMetadata.workflows.workflow_id) {
-    console.log(
-      theme`{error Could not find workflow info for build ${buildID}.}`
-    );
-    process.exit(1);
+  const headers = {};
+  const {CIRCLE_CI_API_TOKEN} = process.env;
+  if (CIRCLE_CI_API_TOKEN != null) {
+    headers['Circle-Token'] = CIRCLE_CI_API_TOKEN;
   }
-  const artifactsJobName = buildMetadata.workflows.job_name.endsWith(
-    '_experimental'
-  )
-    ? 'process_artifacts_experimental'
-    : 'process_artifacts';
-  const workflowID = buildMetadata.workflows.workflow_id;
-  const workflowMetadataURL = `https://circleci.com/api/v2/workflow/${workflowID}/job?circle-token=${
-    process.env.CIRCLE_CI_API_TOKEN
-  }`;
-  const workflowMetadata = await http.get(workflowMetadataURL, true);
-  const job = workflowMetadata.items.find(
-    ({name}) => name === artifactsJobName
-  );
-  if (!job || !job.job_number) {
-    console.log(
-      theme`{error Could not find "${artifactsJobName}" job for workflow ${workflowID}.}`
-    );
-    process.exit(1);
-  }
-
-  const jobArtifactsURL = `https://circleci.com/api/v1.1/project/github/facebook/react/${
-    job.job_number
-  }/artifacts?circle-token=${process.env.CIRCLE_CI_API_TOKEN}`;
-  const jobArtifacts = await http.get(jobArtifactsURL, true);
-
-  return jobArtifacts;
+  const jobArtifactsURL = `https://circleci.com/api/v1.1/project/github/facebook/react/${buildID}/artifacts`;
+  const jobArtifacts = await fetch(jobArtifactsURL, {headers});
+  return jobArtifacts.json();
 };
 
 const getBuildInfo = async () => {
@@ -87,24 +77,27 @@ const getBuildInfo = async () => {
   const branch = await execRead('git branch | grep \\* | cut -d " " -f2', {
     cwd,
   });
-  const commit = await execRead('git show -s --format=%h', {cwd});
+  const commit = await execRead('git show -s --no-show-signature --format=%h', {
+    cwd,
+  });
   const checksum = await getChecksumForCurrentRevision(cwd);
+  const dateString = await getDateStringForCommit(commit);
   const version = isExperimental
-    ? `0.0.0-experimental-${commit}`
-    : `0.0.0-${commit}`;
+    ? `0.0.0-experimental-${commit}-${dateString}`
+    : `0.0.0-${commit}-${dateString}`;
 
   // Only available for Circle CI builds.
   // https://circleci.com/docs/2.0/env-vars/
   const buildNumber = process.env.CIRCLE_BUILD_NUM;
 
   // React version is stored explicitly, separately for DevTools support.
-  // See updateVersionsForCanary() below for more info.
+  // See updateVersionsForNext() below for more info.
   const packageJSON = await readJson(
     join(cwd, 'packages', 'react', 'package.json')
   );
   const reactVersion = isExperimental
-    ? `${packageJSON.version}-experimental-${commit}`
-    : `${packageJSON.version}-${commit}`;
+    ? `${packageJSON.version}-experimental-${commit}-${dateString}`
+    : `${packageJSON.version}-${commit}-${dateString}`;
 
   return {branch, buildNumber, checksum, commit, reactVersion, version};
 };
@@ -118,31 +111,54 @@ const getChecksumForCurrentRevision = async cwd => {
   return hashedPackages.hash.slice(0, 7);
 };
 
-const getPublicPackages = () => {
-  const packagesRoot = join(__dirname, '..', '..', 'packages');
+const getDateStringForCommit = async commit => {
+  let dateString = await execRead(
+    `git show -s --no-show-signature --format=%cd --date=format:%Y%m%d ${commit}`
+  );
 
-  return readdirSync(packagesRoot).filter(dir => {
-    if (RELEASE_SCRIPT_PACKAGE_SKIPLIST.includes(dir)) {
-      return false;
-    }
+  // On CI environment, this string is wrapped with quotes '...'s
+  if (dateString.startsWith("'")) {
+    dateString = dateString.slice(1, 9);
+  }
 
-    const packagePath = join(packagesRoot, dir, 'package.json');
+  return dateString;
+};
 
-    if (dir.charAt(0) !== '.') {
-      let stat;
-      try {
-        stat = statSync(packagePath);
-      } catch (err) {
-        return false;
-      }
-      if (stat.isFile()) {
-        const packageJSON = JSON.parse(readFileSync(packagePath));
-        return packageJSON.private !== true;
-      }
-    }
+const getCommitFromCurrentBuild = async () => {
+  const cwd = join(__dirname, '..', '..');
 
-    return false;
-  });
+  // If this build includes a build-info.json file, extract the commit from it.
+  // Otherwise fall back to parsing from the package version number.
+  // This is important to make the build reproducible (e.g. by Mozilla reviewers).
+  const buildInfoJSON = join(
+    cwd,
+    'build',
+    'oss-experimental',
+    'react',
+    'build-info.json'
+  );
+  if (existsSync(buildInfoJSON)) {
+    const buildInfo = await readJson(buildInfoJSON);
+    return buildInfo.commit;
+  } else {
+    const packageJSON = join(
+      cwd,
+      'build',
+      'oss-experimental',
+      'react',
+      'package.json'
+    );
+    const {version} = await readJson(packageJSON);
+    return extractCommitFromVersionNumber(version);
+  }
+};
+
+const getPublicPackages = isExperimental => {
+  const packageNames = Object.keys(stablePackages);
+  if (isExperimental) {
+    packageNames.push(...experimentalPackages);
+  }
+  return packageNames;
 };
 
 const handleError = error => {
@@ -199,13 +215,14 @@ const splitCommaParams = array => {
 // This method is used by both local Node release scripts and Circle CI bash scripts.
 // It updates version numbers in package JSONs (both the version field and dependencies),
 // As well as the embedded renderer version in "packages/shared/ReactVersion".
-// Canaries version numbers use the format of 0.0.0-<sha> to be easily recognized (e.g. 0.0.0-57239eac8).
+// Canaries version numbers use the format of 0.0.0-<sha>-<date> to be easily recognized (e.g. 0.0.0-01974a867-20200129).
 // A separate "React version" is used for the embedded renderer version to support DevTools,
 // since it needs to distinguish between different version ranges of React.
-// It is based on the version of React in the local package.json (e.g. 16.6.1-canary-57239eac8).
-// Both numbers will be replaced if the canary is promoted to a stable release.
-const updateVersionsForCanary = async (cwd, reactVersion, version) => {
-  const packages = getPublicPackages(join(cwd, 'packages'));
+// It is based on the version of React in the local package.json (e.g. 16.12.0-01974a867-20200129).
+// Both numbers will be replaced if the "next" release is promoted to a stable release.
+const updateVersionsForNext = async (cwd, reactVersion, version) => {
+  const isExperimental = reactVersion.includes('experimental');
+  const packages = getPublicPackages(isExperimental);
   const packagesDir = join(cwd, 'packages');
 
   // Update the shared React version source file.
@@ -215,10 +232,7 @@ const updateVersionsForCanary = async (cwd, reactVersion, version) => {
   const sourceReactVersion = readFileSync(
     sourceReactVersionPath,
     'utf8'
-  ).replace(
-    /module\.exports = '[^']+';/,
-    `module.exports = '${reactVersion}';`
-  );
+  ).replace(/export default '[^']+';/, `export default '${reactVersion}';`);
   writeFileSync(sourceReactVersionPath, sourceReactVersion);
 
   // Update the root package.json.
@@ -240,7 +254,7 @@ const updateVersionsForCanary = async (cwd, reactVersion, version) => {
     packageJSON.version = version;
 
     // Also update inter-package dependencies.
-    // Canary releases always have exact version matches.
+    // Next releases always have exact version matches.
     // The promote script may later relax these (e.g. "^x.x.x") based on source package JSONs.
     const {dependencies, peerDependencies} = packageJSON;
     for (let j = 0; j < packages.length; j++) {
@@ -258,16 +272,19 @@ const updateVersionsForCanary = async (cwd, reactVersion, version) => {
 };
 
 module.exports = {
+  addDefaultParamValue,
   confirm,
   execRead,
   getArtifactsList,
   getBuildInfo,
   getChecksumForCurrentRevision,
+  getCommitFromCurrentBuild,
+  getDateStringForCommit,
   getPublicPackages,
   handleError,
   logPromise,
   printDiff,
   splitCommaParams,
   theme,
-  updateVersionsForCanary,
+  updateVersionsForNext,
 };

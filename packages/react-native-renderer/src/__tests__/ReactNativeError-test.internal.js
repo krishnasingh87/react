@@ -1,5 +1,5 @@
 /**
- * Copyright (c) Facebook, Inc. and its affiliates.
+ * Copyright (c) Meta Platforms, Inc. and affiliates.
  *
  * This source code is licensed under the MIT license found in the
  * LICENSE file in the root directory of this source tree.
@@ -16,7 +16,12 @@ let createReactNativeComponentClass;
 let computeComponentStackForErrorReporting;
 
 function normalizeCodeLocInfo(str) {
-  return str && str.replace(/\(at .+?:\d+\)/g, '(at **)');
+  return (
+    str &&
+    str.replace(/\n +(?:at|in) ([\S]+)[^\n]*/g, function (m, name) {
+      return '\n    in ' + name + ' (at **)';
+    })
+  );
 }
 
 describe('ReactNativeError', () => {
@@ -25,8 +30,9 @@ describe('ReactNativeError', () => {
 
     React = require('react');
     ReactNative = require('react-native-renderer');
-    createReactNativeComponentClass = require('react-native/Libraries/ReactPrivate/ReactNativePrivateInterface')
-      .ReactNativeViewConfigRegistry.register;
+    createReactNativeComponentClass =
+      require('react-native/Libraries/ReactPrivate/ReactNativePrivateInterface')
+        .ReactNativeViewConfigRegistry.register;
     computeComponentStackForErrorReporting =
       ReactNative.__SECRET_INTERNALS_DO_NOT_USE_OR_YOU_WILL_BE_FIRED
         .computeComponentStackForErrorReporting;
@@ -44,6 +50,7 @@ describe('ReactNativeError', () => {
     );
   });
 
+  // @gate !disableLegacyMode
   it('should be able to extract a component stack from a native view', () => {
     const View = createReactNativeComponentClass('View', () => ({
       validAttributes: {foo: true},
@@ -68,26 +75,17 @@ describe('ReactNativeError', () => {
 
     ReactNative.render(<ClassComponent />, 1);
 
-    let reactTag = ReactNative.findNodeHandle(ref.current);
+    const reactTag = ReactNative.findNodeHandle(ref.current);
 
-    let componentStack = normalizeCodeLocInfo(
+    const componentStack = normalizeCodeLocInfo(
       computeComponentStackForErrorReporting(reactTag),
     );
 
-    if (__DEV__) {
-      expect(componentStack).toBe(
-        '\n' +
-          '    in View (at **)\n' +
-          '    in FunctionComponent (at **)\n' +
-          '    in ClassComponent (at **)',
-      );
-    } else {
-      expect(componentStack).toBe(
-        '\n' +
-          '    in View\n' +
-          '    in FunctionComponent\n' +
-          '    in ClassComponent',
-      );
-    }
+    expect(componentStack).toBe(
+      '\n' +
+        '    in View (at **)\n' +
+        '    in FunctionComponent (at **)\n' +
+        '    in ClassComponent (at **)',
+    );
   });
 });

@@ -1,5 +1,5 @@
 /**
- * Copyright (c) Facebook, Inc. and its affiliates.
+ * Copyright (c) Meta Platforms, Inc. and affiliates.
  *
  * This source code is licensed under the MIT license found in the
  * LICENSE file in the root directory of this source tree.
@@ -7,13 +7,10 @@
  * @flow
  */
 
-import React, {
-  createContext,
-  useCallback,
-  useContext,
-  useMemo,
-  useState,
-} from 'react';
+import type {ReactContext} from 'shared/ReactTypes';
+
+import * as React from 'react';
+import {createContext, useCallback, useContext, useMemo, useState} from 'react';
 import {unstable_batchedUpdates as batchedUpdates} from 'react-dom';
 import {useLocalStorage, useSubscription} from '../hooks';
 import {
@@ -21,13 +18,14 @@ import {
   TreeStateContext,
 } from '../Components/TreeContext';
 import {StoreContext} from '../context';
+import {logEvent} from 'react-devtools-shared/src/Logger';
 
 import type {ProfilingDataFrontend} from './types';
 
-export type TabID = 'flame-chart' | 'ranked-chart' | 'interactions';
+export type TabID = 'flame-chart' | 'ranked-chart' | 'timeline';
 
-export type Context = {|
-  // Which tab is selexted in the Profiler UI?
+export type Context = {
+  // Which tab is selected in the Profiler UI?
   selectedTabID: TabID,
   selectTab(id: TabID): void,
 
@@ -69,28 +67,26 @@ export type Context = {|
   selectedFiberID: number | null,
   selectedFiberName: string | null,
   selectFiber: (id: number | null, name: string | null) => void,
+};
 
-  // Which interaction is currently selected in the Interactions graph?
-  selectedInteractionID: number | null,
-  selectInteraction: (id: number | null) => void,
-|};
-
-const ProfilerContext = createContext<Context>(((null: any): Context));
+const ProfilerContext: ReactContext<Context> = createContext<Context>(
+  ((null: any): Context),
+);
 ProfilerContext.displayName = 'ProfilerContext';
 
-type StoreProfilingState = {|
+type StoreProfilingState = {
   didRecordCommits: boolean,
   isProcessingData: boolean,
   isProfiling: boolean,
   profilingData: ProfilingDataFrontend | null,
   supportsProfiling: boolean,
-|};
+};
 
-type Props = {|
+type Props = {
   children: React$Node,
-|};
+};
 
-function ProfilerContextController({children}: Props) {
+function ProfilerContextController({children}: Props): React.Node {
   const store = useContext(StoreContext);
   const {selectedElementID} = useContext(TreeStateContext);
   const dispatch = useContext(TreeDispatcherContext);
@@ -104,18 +100,18 @@ function ProfilerContextController({children}: Props) {
         isProcessingData: profilerStore.isProcessingData,
         isProfiling: profilerStore.isProfiling,
         profilingData: profilerStore.profilingData,
-        supportsProfiling: store.supportsProfiling,
+        supportsProfiling: store.rootSupportsBasicProfiling,
       }),
       subscribe: (callback: Function) => {
         profilerStore.addListener('profilingData', callback);
         profilerStore.addListener('isProcessingData', callback);
         profilerStore.addListener('isProfiling', callback);
-        store.addListener('supportsProfiling', callback);
+        store.addListener('rootSupportsBasicProfiling', callback);
         return () => {
           profilerStore.removeListener('profilingData', callback);
           profilerStore.removeListener('isProcessingData', callback);
           profilerStore.removeListener('isProfiling', callback);
-          store.removeListener('supportsProfiling', callback);
+          store.removeListener('rootSupportsBasicProfiling', callback);
         };
       },
     }),
@@ -129,8 +125,45 @@ function ProfilerContextController({children}: Props) {
     supportsProfiling,
   } = useSubscription<StoreProfilingState>(subscription);
 
-  const [prevProfilingData, setPrevProfilingData] = useState();
+  const [prevProfilingData, setPrevProfilingData] =
+    useState<ProfilingDataFrontend | null>(null);
   const [rootID, setRootID] = useState<number | null>(null);
+  const [selectedFiberID, selectFiberID] = useState<number | null>(null);
+  const [selectedFiberName, selectFiberName] = useState<string | null>(null);
+
+  const selectFiber = useCallback(
+    (id: number | null, name: string | null) => {
+      selectFiberID(id);
+      selectFiberName(name);
+
+      // Sync selection to the Components tab for convenience.
+      // Keep in mind that profiling data may be from a previous session.
+      // If data has been imported, we should skip the selection sync.
+      if (
+        id !== null &&
+        profilingData !== null &&
+        profilingData.imported === false
+      ) {
+        // We should still check to see if this element is still in the store.
+        // It may have been removed during profiling.
+        if (store.containsElement(id)) {
+          dispatch({
+            type: 'SELECT_ELEMENT_BY_ID',
+            payload: id,
+          });
+        }
+      }
+    },
+    [dispatch, selectFiberID, selectFiberName, store, profilingData],
+  );
+
+  const setRootIDAndClearFiber = useCallback(
+    (id: number | null) => {
+      selectFiber(null, null);
+      setRootID(id);
+    },
+    [setRootID, selectFiber],
+  );
 
   if (prevProfilingData !== profilingData) {
     batchedUpdates(() => {
@@ -144,34 +177,24 @@ function ProfilerContextController({children}: Props) {
         if (rootID === null || !dataForRoots.has(rootID)) {
           let selectedElementRootID = null;
           if (selectedElementID !== null) {
-            selectedElementRootID = store.getRootIDForElement(
-              selectedElementID,
-            );
+            selectedElementRootID =
+              store.getRootIDForElement(selectedElementID);
           }
           if (
             selectedElementRootID !== null &&
             dataForRoots.has(selectedElementRootID)
           ) {
-            setRootID(selectedElementRootID);
+            setRootIDAndClearFiber(selectedElementRootID);
           } else {
-            setRootID(firstRootID);
+            setRootIDAndClearFiber(firstRootID);
           }
         }
       }
     });
   }
 
-  const startProfiling = useCallback(
-    () => store.profilerStore.startProfiling(),
-    [store],
-  );
-  const stopProfiling = useCallback(() => store.profilerStore.stopProfiling(), [
-    store,
-  ]);
-
-  const [isCommitFilterEnabled, setIsCommitFilterEnabled] = useLocalStorage<
-    boolean,
-  >('React::DevTools::isCommitFilterEnabled', false);
+  const [isCommitFilterEnabled, setIsCommitFilterEnabled] =
+    useLocalStorage<boolean>('React::DevTools::isCommitFilterEnabled', false);
   const [minCommitDuration, setMinCommitDuration] = useLocalStorage<number>(
     'minCommitDuration',
     0,
@@ -180,33 +203,29 @@ function ProfilerContextController({children}: Props) {
   const [selectedCommitIndex, selectCommitIndex] = useState<number | null>(
     null,
   );
-  const [selectedTabID, selectTab] = useState<TabID>('flame-chart');
-  const [selectedFiberID, selectFiberID] = useState<number | null>(null);
-  const [selectedFiberName, selectFiberName] = useState<string | null>(null);
-  const [selectedInteractionID, selectInteraction] = useState<number | null>(
-    null,
+  const [selectedTabID, selectTab] = useLocalStorage<TabID>(
+    'React::DevTools::Profiler::defaultTab',
+    'flame-chart',
+    value => {
+      logEvent({
+        event_name: 'profiler-tab-changed',
+        metadata: {
+          tabId: value,
+        },
+      });
+    },
   );
 
-  const selectFiber = useCallback(
-    (id: number | null, name: string | null) => {
-      selectFiberID(id);
-      selectFiberName(name);
-
-      // Sync selection to the Components tab for convenience.
-      if (id !== null) {
-        const element = store.getElementByID(id);
-
-        // Keep in mind that profiling data may be from a previous session.
-        // In that case, IDs may match up arbitrarily; to be safe, compare both ID and display name.
-        if (element !== null && element.displayName === name) {
-          dispatch({
-            type: 'SELECT_ELEMENT_BY_ID',
-            payload: id,
-          });
-        }
-      }
-    },
-    [dispatch, selectFiberID, selectFiberName, store],
+  const startProfiling = useCallback(() => {
+    logEvent({
+      event_name: 'profiling-start',
+      metadata: {current_tab: selectedTabID},
+    });
+    store.profilerStore.startProfiling();
+  }, [store, selectedTabID]);
+  const stopProfiling = useCallback(
+    () => store.profilerStore.stopProfiling(),
+    [store],
   );
 
   if (isProfiling) {
@@ -217,9 +236,6 @@ function ProfilerContextController({children}: Props) {
       if (selectedFiberID !== null) {
         selectFiberID(null);
         selectFiberName(null);
-      }
-      if (selectedInteractionID !== null) {
-        selectInteraction(null);
       }
     });
   }
@@ -238,7 +254,7 @@ function ProfilerContextController({children}: Props) {
       supportsProfiling,
 
       rootID,
-      setRootID,
+      setRootID: setRootIDAndClearFiber,
 
       isCommitFilterEnabled,
       setIsCommitFilterEnabled,
@@ -251,9 +267,6 @@ function ProfilerContextController({children}: Props) {
       selectedFiberID,
       selectedFiberName,
       selectFiber,
-
-      selectedInteractionID,
-      selectInteraction,
     }),
     [
       selectedTabID,
@@ -269,6 +282,7 @@ function ProfilerContextController({children}: Props) {
 
       rootID,
       setRootID,
+      setRootIDAndClearFiber,
 
       isCommitFilterEnabled,
       setIsCommitFilterEnabled,
@@ -281,9 +295,6 @@ function ProfilerContextController({children}: Props) {
       selectedFiberID,
       selectedFiberName,
       selectFiber,
-
-      selectedInteractionID,
-      selectInteraction,
     ],
   );
 

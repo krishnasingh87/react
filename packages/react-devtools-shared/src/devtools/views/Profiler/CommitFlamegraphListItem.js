@@ -1,5 +1,5 @@
 /**
- * Copyright (c) Facebook, Inc. and its affiliates.
+ * Copyright (c) Meta Platforms, Inc. and affiliates.
  *
  * This source code is licensed under the MIT license found in the
  * LICENSE file in the root directory of this source tree.
@@ -7,24 +7,29 @@
  * @flow
  */
 
-import React, {Fragment, memo, useCallback, useContext} from 'react';
+import * as React from 'react';
+import {Fragment, memo, useCallback, useContext} from 'react';
 import {areEqual} from 'react-window';
 import {barWidthThreshold} from './constants';
 import {getGradientColor} from './utils';
 import ChartNode from './ChartNode';
 import {SettingsContext} from '../Settings/SettingsContext';
 
+import type {ChartNode as ChartNodeType} from './FlamegraphChartBuilder';
 import type {ItemData} from './CommitFlamegraph';
 
 type Props = {
   data: ItemData,
   index: number,
   style: Object,
+  ...
 };
 
-function CommitFlamegraphListItem({data, index, style}: Props) {
+function CommitFlamegraphListItem({data, index, style}: Props): React.Node {
   const {
     chartData,
+    onElementMouseEnter,
+    onElementMouseLeave,
     scaleX,
     selectedChartNode,
     selectedChartNodeIndex,
@@ -34,13 +39,23 @@ function CommitFlamegraphListItem({data, index, style}: Props) {
   const {renderPathNodes, maxSelfDuration, rows} = chartData;
 
   const {lineHeight} = useContext(SettingsContext);
+
   const handleClick = useCallback(
-    (event: SyntheticMouseEvent<*>, id: number, name: string) => {
+    (event: SyntheticMouseEvent<EventTarget>, id: number, name: string) => {
       event.stopPropagation();
       selectFiber(id, name);
     },
     [selectFiber],
   );
+
+  const handleMouseEnter = (nodeData: ChartNodeType) => {
+    const {id, name} = nodeData;
+    onElementMouseEnter({id, name});
+  };
+
+  const handleMouseLeave = () => {
+    onElementMouseLeave();
+  };
 
   // List items are absolutely positioned using the CSS "top" attribute.
   // The "left" value will always be 0.
@@ -50,7 +65,7 @@ function CommitFlamegraphListItem({data, index, style}: Props) {
 
   const row = rows[index];
 
-  let selectedNodeOffset = scaleX(
+  const selectedNodeOffset = scaleX(
     selectedChartNode !== null ? selectedChartNode.offset : 0,
     width,
   );
@@ -103,6 +118,8 @@ function CommitFlamegraphListItem({data, index, style}: Props) {
             key={id}
             label={label}
             onClick={event => handleClick(event, id, name)}
+            onMouseEnter={() => handleMouseEnter(chartNode)}
+            onMouseLeave={handleMouseLeave}
             textStyle={{color: textColor}}
             width={nodeWidth}
             x={nodeOffset - selectedNodeOffset}
@@ -114,4 +131,7 @@ function CommitFlamegraphListItem({data, index, style}: Props) {
   );
 }
 
-export default memo<Props>(CommitFlamegraphListItem, areEqual);
+export default (memo(
+  CommitFlamegraphListItem,
+  areEqual,
+): React.ComponentType<Props>);
